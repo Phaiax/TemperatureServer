@@ -42,6 +42,10 @@ if [ $OUT -eq 0 ]; then
     sudo systemctl stop $SERVICENAME
 fi
 
+echo "** ENABLE SERVICE FOR AUTOSTART"
+
+sudo systemctl enable $SERVICENAME
+
 echo "** START SERVICE"
 
 sudo systemctl start $SERVICENAME

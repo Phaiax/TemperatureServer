@@ -1,6 +1,7 @@
 
 use failure::Error;
-use SharedData;
+
+use shared::SharedDataRc;
 
 use hyper::server::{Http, Request, Response, Service, Server, NewService};
 use hyper::header::ContentLength;
@@ -9,13 +10,13 @@ use futures::future::Future;
 use futures;
 
 
-pub fn make_web_server(shared : &SharedData) -> Server<HelloWorldSpawner, ::hyper::Body> {
+pub fn make_web_server(shared : &SharedDataRc) -> Server<HelloWorldSpawner, ::hyper::Body> {
     let addr = "0.0.0.0:12345".parse().unwrap();
     Http::new().bind(&addr, HelloWorldSpawner { shared : shared.clone() }).unwrap()
 }
 
 pub struct HelloWorldSpawner {
-    shared : SharedData,
+    shared : SharedDataRc,
 }
 
 impl NewService for HelloWorldSpawner {
@@ -31,7 +32,7 @@ impl NewService for HelloWorldSpawner {
 }
 
 pub struct HelloWorld {
-    shared : SharedData,
+    shared : SharedDataRc,
 }
 
 impl Service for HelloWorld {
@@ -47,7 +48,7 @@ impl Service for HelloWorld {
         // We're currently ignoring the Request
         // And returning an 'ok' Future, which means it's ready
         // immediately, and build a Response with the 'PHRASE' body.
-        let shared = self.shared.get();
+        let shared = self.shared.temperatures.get();
         let formatted = format!("{:?}", shared);
 
         Box::new(futures::future::ok(

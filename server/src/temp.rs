@@ -33,13 +33,19 @@ pub struct TemperatureStats {
 
 impl Debug for TemperatureStats {
     fn fmt(&self, f: &mut Formatter) -> Result<(), ::std::fmt::Error> {
-        let mean_celsius = raw2celsius(&self.mean);
-        write!(f, "Means: {:.1}°C ({:.2}) ", mean_celsius[0], self.std_dev[0])?;
-        write!(f, "{:.1}°C ({:.2}) ", mean_celsius[1], self.std_dev[1])?;
-        write!(f, "{:.1}°C ({:.2}) ", mean_celsius[2], self.std_dev[2])?;
-        write!(f, "{:.1}°C ({:.2}) ", mean_celsius[3], self.std_dev[3])?;
-        write!(f, "{:.1}°C ({:.2}) ", mean_celsius[4], self.std_dev[4])?;
-        write!(f, "{:.1}°C ({:.2}) ", mean_celsius[5], self.std_dev[5])?;
+        let _mean_celsius = raw2celsius(&self.mean);
+        write!(f, "[ {:3.1}, ", self.mean[0])?;
+        write!(f, "{:3.1}, ", self.mean[1])?;
+        write!(f, "{:3.1}, ", self.mean[2])?;
+        write!(f, "{:3.1}, ", self.mean[3])?;
+        write!(f, "{:3.1}, ", self.mean[4])?;
+        write!(f, "{:3.1} ] (std:{:.1}) ", self.mean[5], self.std_dev[0])?;
+        // write!(f, "Means: {:.1}°C ({:.1}, {:.1}) ", mean_celsius[0], self.mean[0], self.std_dev[0])?;
+        // write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[1], self.mean[1], self.std_dev[1])?;
+        // write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[2], self.mean[2], self.std_dev[2])?;
+        // write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[3], self.mean[3], self.std_dev[3])?;
+        // write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[4], self.mean[4], self.std_dev[4])?;
+        // write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[5], self.mean[5], self.std_dev[5])?;
         Ok(())
     }
 }
