@@ -2,8 +2,7 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use failure::Error;
-use failure::ResultExt;
+use failure::{Error, ResultExt, err_msg};
 
 use futures::Stream;
 use futures::Sink;
@@ -24,7 +23,7 @@ use NANOEXT_SERIAL_DEVICE;
 use ErrorEvent;
 
 /// `error_sink` can be used to respawn the serial handler
-pub fn init_serial_port(serialhandle: &Handle,
+pub fn init_serial_port(reactor_handle: &Handle,
                         shared : &SharedDataRc,
                         error_sink : Sender<ErrorEvent>) -> Result<(), Error> {
 
@@ -39,7 +38,7 @@ pub fn init_serial_port(serialhandle: &Handle,
 
     let serial = Serial::from_path(NANOEXT_SERIAL_DEVICE,
                                    &serialsetting,
-                                   &serialhandle)
+                                   &reactor_handle)
                         .context("NANOEXT not connected")?;
 
     let serial = serial.framed(SerialCodec::new());
@@ -71,14 +70,13 @@ pub fn init_serial_port(serialhandle: &Handle,
     }).or_else(|_e| {
         // Map the error type to `()`, but at least print the error.
         error!("NANOEXT decoder error: {:?}", _e);
-        let a = error_sink.send(ErrorEvent::NanoExtDecoderError).map_err(|_| () );
-        let e : <typeof(a) as Future>::Error = "23";
-        a
+        // Will maybe spawn a new Nanoext
+        error_sink.send(ErrorEvent::NanoExtDecoderError).wait().ok();
+        err(())
     });
 
-    let a : () = serialfuture;
 
-    serialhandle.spawn(serialfuture);
+    reactor_handle.spawn(serialfuture.map_err(|_| () ));
 
     Ok(())
 }
@@ -203,7 +201,6 @@ impl Decoder for SerialCodec
         self.sample(&temperatures);
 
         return Ok(Some((temperatures, self.stats())));
-
     }
 }
 

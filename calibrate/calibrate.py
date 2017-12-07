@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 # c=0
 
 # LSQ     Ah=y    h=(A^T A)^-1 A^T y
+# WLSQ    Ah=y    h=(A^T W A)^-1 A^T W y
 
 # Solve Steinhard-Hart with LSQ using this gls
 
@@ -46,10 +47,11 @@ def raw2R(raw):
 # Input: Measurements     [t]     [d]
 #                         [.]     [ ]
 #                         [.]     [ ]
-def lsq(temperatures, raws):
+def lsq(temperatures, raws, weights):
     assert len(temperatures) == len(raws)
     R = np.array([raw2R(r) for r in raws])
     Tinv = np.array([1/(t+273.15) for t in temperatures])
+    W = np.diag(weights)
 
     A = np.zeros((len(R), 3))
     for i, r in enumerate(R):
@@ -58,6 +60,14 @@ def lsq(temperatures, raws):
         A[i, 2] = A[i, 1] ** 3
 
     h = np.linalg.lstsq(A, Tinv)
+    tmp = np.matmul(A.transpose(), W)
+    tmp2 = np.linalg.inv(np.matmul(tmp, A))
+    tmp3 = np.matmul(np.matmul(tmp2, A.transpose()), W)
+    h2 = np.dot(tmp3, Tinv)
+
+    # print h[0]
+    # print h2
+    # assert h[0] == h2
     return h[0]
     pass
 
@@ -92,17 +102,69 @@ def plot2(a, b, c):
 # -18.5 ,  811.2   806.7   698.4   650.6   692.9   771.1
 # 2.4   ,  700.0   701.1   620.1   580.9   614.5   678.8
 
-temps = np.array([-1.6, 16.2, -18.5, 2.4])
-sensors_raws = [ np.array([720.8 ,590.2 ,811.2 ,700.0]),
-                 np.array([720.6, 595.6, 806.7, 701.1]),
-                 np.array([633.6, 539.1, 698.4, 620.1]),
-                 np.array([590.2, 513.8, 650.6, 580.9]),
-                 np.array([624.7, 537.5, 692.9, 614.5]),
-                 np.array([691.0, 585.0, 771.1, 678.8]) ]
+# temps = np.array([-1.6, 16.2, -18.5, 2.4])
+# sensors_raws = [ np.array([720.8 ,590.2 ,811.2 ,700.0]),
+#                  np.array([720.6, 595.6, 806.7, 701.1]),
+#                  np.array([633.6, 539.1, 698.4, 620.1]),
+#                  np.array([590.2, 513.8, 650.6, 580.9]),
+#                  np.array([624.7, 537.5, 692.9, 614.5]),
+#                  np.array([691.0, 585.0, 771.1, 678.8]) ]
+# weights = [1, 1, 1, 1] #weight of measurement
+[ 691.4, 693.9, 615.9, 579.8, 612.5, 672.5 ]
+[ 677.4, 680.6, 606.5, 569.9, 600.1, 659.9 ]
+[ 809.6, 806.3, 702.5, 650.1, 688.4, 766.5 ]
+[ 813.7, 811.5, 697.6, 646.6, 683.9, 761.6 ]
+[ 702.6, 700.8, 622.5, 581.1, 615.9, 680.0 ]
+[ 701.7, 700.2, 621.5, 580.8, 615.3, 679.5 ]
+[ 595.4, 599.9, 542.3, 516.4, 541.6, 592.1 ]
+
+temps = np.array([4.81, 5.93, -14.31, -17.74, 1.93, 2.06, 15.87])
+sensors_raws = [ np.array([691.4,
+677.4,
+809.6,
+813.7,
+702.6,
+701.7,
+595.4]),
+                 np.array([693.9,
+680.6,
+806.3,
+811.5,
+700.8,
+700.2,
+599.9]),
+                 np.array([615.9,
+606.5,
+702.5,
+697.6,
+622.5,
+621.5,
+542.3]),
+                 np.array([579.8,
+569.9,
+650.1,
+646.6,
+581.1,
+580.8,
+516.4]),
+                 np.array([612.5,
+600.1,
+688.4,
+683.9,
+615.9,
+615.3,
+541.6]),
+                 np.array([672.5,
+659.9,
+766.5,
+761.6,
+680.0,
+679.5,
+592.1]) ]
+weights = [1, 1, 1, 0.2, 1, 0.2, 1] #weight of measurement
 
 
-
-coefficients = [lsq(temps, sr) for sr in sensors_raws]
+coefficients = [lsq(temps, sr, weights) for sr in sensors_raws]
 
 print coefficients
 
