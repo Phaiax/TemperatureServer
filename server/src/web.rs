@@ -3,20 +3,27 @@ use failure::Error;
 
 use shared::SharedDataRc;
 
-use hyper::server::{Http, Request, Response, Service, Server, NewService};
+use hyper::server::{Http, NewService, Request, Response, Server, Service};
 use hyper::header::ContentLength;
 
 use futures::future::Future;
 use futures;
 
 
-pub fn make_web_server(shared : &SharedDataRc) -> Server<HelloWorldSpawner, ::hyper::Body> {
+pub fn make_web_server(shared: &SharedDataRc) -> Server<HelloWorldSpawner, ::hyper::Body> {
     let addr = "0.0.0.0:12345".parse().unwrap();
-    Http::new().bind(&addr, HelloWorldSpawner { shared : shared.clone() }).unwrap()
+    Http::new()
+        .bind(
+            &addr,
+            HelloWorldSpawner {
+                shared: shared.clone(),
+            },
+        )
+        .unwrap()
 }
 
 pub struct HelloWorldSpawner {
-    shared : SharedDataRc,
+    shared: SharedDataRc,
 }
 
 impl NewService for HelloWorldSpawner {
@@ -25,14 +32,14 @@ impl NewService for HelloWorldSpawner {
     type Error = ::hyper::Error;
     type Instance = HelloWorld;
     fn new_service(&self) -> Result<Self::Instance, ::std::io::Error> {
-        Ok(
-            HelloWorld { shared: self.shared.clone() }
-        )
+        Ok(HelloWorld {
+            shared: self.shared.clone(),
+        })
     }
 }
 
 pub struct HelloWorld {
-    shared : SharedDataRc,
+    shared: SharedDataRc,
 }
 
 impl Service for HelloWorld {
@@ -42,7 +49,7 @@ impl Service for HelloWorld {
     type Error = ::hyper::Error;
     // The future representing the eventual Response your call will
     // resolve to. This can change to whatever Future you need.
-    type Future = Box<Future<Item=Self::Response, Error=Self::Error>>;
+    type Future = Box<Future<Item = Self::Response, Error = Self::Error>>;
 
     fn call(&self, _req: Request) -> Self::Future {
         // We're currently ignoring the Request
@@ -54,7 +61,7 @@ impl Service for HelloWorld {
         Box::new(futures::future::ok(
             Response::new()
                 .with_header(ContentLength(formatted.len() as u64))
-                .with_body(formatted)
+                .with_body(formatted),
         ))
     }
 }

@@ -10,25 +10,24 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use failure::{Error, err_msg, ResultExt};
+use failure::{err_msg, Error, ResultExt};
 
 use futures::Stream;
-use futures::future::{Future, ok, err};
+use futures::future::{err, ok, Future};
 use tokio_io::codec::{Decoder, Encoder};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_core::reactor::Handle;
-use tokio_serial::{Serial, SerialPortSettings, BaudRate, DataBits, FlowControl, Parity, StopBits,
-                   SerialPort};
+use tokio_serial::{BaudRate, DataBits, FlowControl, Parity, Serial, SerialPort,
+                   SerialPortSettings, StopBits};
 
 use bytes::BytesMut;
 
-use temp::{Temperatures, TemperatureStats};
+use temp::{TemperatureStats, Temperatures};
 use TLOG20_SERIAL_DEVICE;
 
 
 
 pub fn init_serial_port(reactor_handle: &Handle) -> Result<(), Error> {
-
     let serialsetting = SerialPortSettings {
         baud_rate: BaudRate::Baud4800,
         data_bits: DataBits::Eight,
@@ -38,28 +37,28 @@ pub fn init_serial_port(reactor_handle: &Handle) -> Result<(), Error> {
         timeout: Duration::from_millis(15000),
     };
 
-    let serial = Serial::from_path(TLOG20_SERIAL_DEVICE,
-                                   &serialsetting,
-                                   &reactor_handle)
-                .context("TLOG20 not connected")?;
+    let serial = Serial::from_path(TLOG20_SERIAL_DEVICE, &serialsetting, &reactor_handle)
+        .context("TLOG20 not connected")?;
 
     let serial = serial.framed(Tlog20Codec::new());
 
     // `for_each` processes the `Stream` of decoded Tlog20Codec::Items (`f64`)
     // and returns a future that represents this processing until the end of time.
     // We can only spawn `Future<Item = (), Error = ()>`.
-    let serialfuture = serial.for_each(|ts| {
-        // New Item arrived
-        info!("Reference: {:?}", ts);
-        // This closure must return a future `Future<Item = (), Error = Tlog20Codec::Error>`.
-        // `for_each` will run this future to completion before processing the next item.
-        // But we can simply return an empty future.
-        ok(())
-    }).or_else(|_e| {
-        // Map the error type to `()`, but at least print the error.
-        error!("TLOG20 decoder error: {:?}", _e);
-        err(())
-    });
+    let serialfuture = serial
+        .for_each(|ts| {
+            // New Item arrived
+            info!("Reference: {:?}", ts);
+            // This closure must return a future `Future<Item = (), Error = Tlog20Codec::Error>`.
+            // `for_each` will run this future to completion before processing the next item.
+            // But we can simply return an empty future.
+            ok(())
+        })
+        .or_else(|_e| {
+            // Map the error type to `()`, but at least print the error.
+            error!("TLOG20 decoder error: {:?}", _e);
+            err(())
+        });
 
     reactor_handle.spawn(serialfuture);
 
@@ -84,19 +83,16 @@ pub fn init_serial_port(reactor_handle: &Handle) -> Result<(), Error> {
 /// - `01` ?
 /// - `0840`: Temperature in hex and the unit 0.01 deg Celsius
 /// - `4A`: Checksum of the line
-struct Tlog20Codec {
-}
+struct Tlog20Codec {}
 
 impl Tlog20Codec {
     fn new() -> Tlog20Codec {
-        Tlog20Codec {
-        }
+        Tlog20Codec {}
     }
 }
 
 
-impl Decoder for Tlog20Codec
-{
+impl Decoder for Tlog20Codec {
     type Item = f64;
     type Error = Error;
 
@@ -104,11 +100,7 @@ impl Decoder for Tlog20Codec
     //        Ok(Some(item)) if an item was found
     //        Err(error) on disconnect or non recoverable error
     // Do not panic
-    fn decode(
-        &mut self,
-        src: &mut BytesMut
-    ) -> Result<Option<Self::Item>, Self::Error> {
-
+    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let pos_end = src.iter().position(|&b| b == b'$');
         if pos_end.is_none() {
             return Ok(None);
@@ -116,7 +108,7 @@ impl Decoder for Tlog20Codec
         let pos_end = pos_end.unwrap();
 
         // extract from input buffer until first `$`, including `$`
-        let buf = src.split_to(pos_end+1);
+        let buf = src.split_to(pos_end + 1);
 
         // contains a complete data set?
         let pos_begin = buf.iter().position(|&b| b == b'@');
@@ -134,7 +126,7 @@ impl Decoder for Tlog20Codec
         }
 
         // cut trailing `$`
-        let buf = &buf[pos_begin..buf.len()-1];
+        let buf = &buf[pos_begin..buf.len() - 1];
 
         let as_str = String::from_utf8_lossy(buf); // Cow
 
@@ -166,15 +158,10 @@ impl Decoder for Tlog20Codec
     }
 }
 
-impl Encoder for Tlog20Codec
-{
+impl Encoder for Tlog20Codec {
     type Item = String;
     type Error = Error;
-    fn encode(
-        &mut self,
-        _item: Self::Item,
-        _dst: &mut BytesMut
-    ) -> Result<(), Self::Error> {
+    fn encode(&mut self, _item: Self::Item, _dst: &mut BytesMut) -> Result<(), Self::Error> {
         Ok(())
     }
 }

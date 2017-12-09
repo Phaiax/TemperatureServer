@@ -1,15 +1,15 @@
 
-use std::fmt::{Formatter, Debug};
+use std::fmt::{Debug, Formatter};
 
 #[allow(non_snake_case)]
-fn raw2celsius_single(raw : f64, a : f64, b : f64, c : f64) -> f64 {
-    let R : f64 = (raw * 100000.) / (1023. - raw);
+fn raw2celsius_single(raw: f64, a: f64, b: f64, c: f64) -> f64 {
+    let R: f64 = (raw * 100000.) / (1023. - raw);
     let Tinv = a + b * R.ln() + c * R.ln().powi(3);
-    let T = (1./Tinv) - 273.15;
+    let T = (1. / Tinv) - 273.15;
     return T;
 }
 
-fn raw2celsius(raw : &[f64 ; 6]) -> [f64; 6] {
+fn raw2celsius(raw: &[f64; 6]) -> [f64; 6] {
     [
         raw2celsius_single(raw[0], 1.08067787e-02, -1.09703050e-03, 3.39993112e-06),
         raw2celsius_single(raw[1], 1.26655441e-02, -1.33464022e-03, 3.97068257e-06),
@@ -22,13 +22,13 @@ fn raw2celsius(raw : &[f64 ; 6]) -> [f64; 6] {
 
 #[derive(Debug, Copy, Clone)]
 pub struct Temperatures {
-    pub raw : [u32; 6]
+    pub raw: [u32; 6],
 }
 
 #[derive(Clone, Default, Copy)]
 pub struct TemperatureStats {
-    pub mean : [f64; 6],
-    pub std_dev : [f64; 6],
+    pub mean: [f64; 6],
+    pub std_dev: [f64; 6],
 }
 
 impl Debug for TemperatureStats {
@@ -40,7 +40,8 @@ impl Debug for TemperatureStats {
         write!(f, "{:3.1}, ", self.mean[3])?;
         write!(f, "{:3.1}, ", self.mean[4])?;
         write!(f, "{:3.1} ] (std:{:.1}) ", self.mean[5], self.std_dev[0])?;
-        // write!(f, "Means: {:.1}°C ({:.1}, {:.1}) ", mean_celsius[0], self.mean[0], self.std_dev[0])?;
+        // write!(f, "Means: {:.1}°C ({:.1}, {:.1}) ",
+        // mean_celsius[0], self.mean[0], self.std_dev[0])?;
         // write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[1], self.mean[1], self.std_dev[1])?;
         // write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[2], self.mean[2], self.std_dev[2])?;
         // write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[3], self.mean[3], self.std_dev[3])?;
