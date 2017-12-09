@@ -13,7 +13,7 @@ use std::time::Duration;
 use failure::{err_msg, Error, ResultExt};
 
 use futures::Stream;
-use futures::future::{err, ok, Future};
+use futures::{future, Future};
 use tokio_io::codec::{Decoder, Encoder};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_core::reactor::Handle;
@@ -22,12 +22,13 @@ use tokio_serial::{BaudRate, DataBits, FlowControl, Parity, Serial, SerialPort,
 
 use bytes::BytesMut;
 
+use Shared;
 use temp::{TemperatureStats, Temperatures};
 use TLOG20_SERIAL_DEVICE;
 
 
 
-pub fn init_serial_port(reactor_handle: &Handle) -> Result<(), Error> {
+pub fn init_serial_port(shared: Shared) -> Result<(), Error> {
     let serialsetting = SerialPortSettings {
         baud_rate: BaudRate::Baud4800,
         data_bits: DataBits::Eight,
@@ -37,7 +38,7 @@ pub fn init_serial_port(reactor_handle: &Handle) -> Result<(), Error> {
         timeout: Duration::from_millis(15000),
     };
 
-    let serial = Serial::from_path(TLOG20_SERIAL_DEVICE, &serialsetting, &reactor_handle)
+    let serial = Serial::from_path(TLOG20_SERIAL_DEVICE, &serialsetting, &shared.handle())
         .context("TLOG20 not connected")?;
 
     let serial = serial.framed(Tlog20Codec::new());
@@ -52,15 +53,15 @@ pub fn init_serial_port(reactor_handle: &Handle) -> Result<(), Error> {
             // This closure must return a future `Future<Item = (), Error = Tlog20Codec::Error>`.
             // `for_each` will run this future to completion before processing the next item.
             // But we can simply return an empty future.
-            ok(())
+            future::ok(())
         })
         .or_else(|_e| {
             // Map the error type to `()`, but at least print the error.
             error!("TLOG20 decoder error: {:?}", _e);
-            err(())
+            future::err(())
         });
 
-    reactor_handle.spawn(serialfuture);
+    shared.handle().spawn(serialfuture);
 
     Ok(())
 }

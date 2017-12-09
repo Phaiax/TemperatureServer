@@ -73,7 +73,7 @@ void readAddTemperatures() {
   for (int i = 0; i<6; i++) {
     delay(4);
     enablePullup(i+2);
-    temperatures[i] += analogRead(i+2);
+    temperatures[i] += analogRead(i+2); // 0.1µs
     disablePullup(i+2);
   }
 }
@@ -106,24 +106,32 @@ void printTemperatures() {
   Serial.println(";");
 }
 
+int incomingByte = 0;   // for incoming serial data
+
+void check_command() {
+
+  if (Serial.available() > 0) {
+    incomingByte = Serial.read();
+    if (incomingByte == '1') {
+      digitalWrite(RELAIS_PIN, HIGH);
+    } else if (incomingByte == '0') {
+      digitalWrite(RELAIS_PIN, LOW);
+    }
+  }
+
+}
+
 void loop()
 {
 
-  readTemperatures();
+  readTemperatures(); // ~500 ms
 
-  // turn the LED on (HIGH is the voltage level)
-  digitalWrite(LED_BUILTIN, HIGH);
-  // digitalWrite(RELAIS_PIN, HIGH);
-
-  // wait for a second
   delay(20);
 
-  printTemperatures();
+  check_command();
 
-  // turn the LED off by making the voltage LOW
-  digitalWrite(LED_BUILTIN, LOW);
-  // digitalWrite(RELAIS_PIN, LOW);
+  printTemperatures(); // 6 ms
 
-   // wait for a second
   delay(20);
+
 }

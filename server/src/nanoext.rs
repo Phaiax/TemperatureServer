@@ -5,29 +5,29 @@ use std::time::Duration;
 use failure::{err_msg, Error, ResultExt};
 
 use futures::Stream;
+use futures::stream::SplitSink;
 use futures::Sink;
-use futures::future::{err, ok, Future};
+use futures::{future, Future};
 use futures::unsync::mpsc::Sender;
 
-use tokio_io::codec::{Decoder, Encoder};
+use tokio_io::codec::{Decoder, Encoder, Framed};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_core::reactor::Handle;
 use tokio_serial::{BaudRate, DataBits, FlowControl, Parity, Serial, SerialPort,
                    SerialPortSettings, StopBits};
 
 use bytes::BytesMut;
+use bytes::buf::BufMut;
 
 use temp::{TemperatureStats, Temperatures};
-use shared::SharedDataRc;
+use Shared;
 use NANOEXT_SERIAL_DEVICE;
 use ErrorEvent;
 
+pub type NanoextCommandSink = SplitSink<Framed<Serial, NanoextCodec>>;
+
 /// `error_sink` can be used to respawn the serial handler
-pub fn init_serial_port(
-    reactor_handle: &Handle,
-    shared: &SharedDataRc,
-    error_sink: Sender<ErrorEvent>,
-) -> Result<(), Error> {
+pub fn init_serial_port(shared: Shared) -> Result<NanoextCommandSink, Error>  {
     let serialsetting = SerialPortSettings {
         baud_rate: BaudRate::Baud9600,
         data_bits: DataBits::Eight,
@@ -37,19 +37,21 @@ pub fn init_serial_port(
         timeout: Duration::from_millis(1000),
     };
 
-    let serial = Serial::from_path(NANOEXT_SERIAL_DEVICE, &serialsetting, &reactor_handle)
+    let serial = Serial::from_path(NANOEXT_SERIAL_DEVICE, &serialsetting, &shared.handle())
         .context("NANOEXT not connected")?;
 
-    let serial = serial.framed(SerialCodec::new());
+    let serial = serial.framed(NanoextCodec::new());
+    let (serial_write, serial_read) = serial.split();
 
     let shared_clone = shared.clone(); // for moving into closure
+    let shared_clone2 = shared.clone(); // for moving into closure
 
     let mut every_i = 0u32;
 
     // `for_each` processes the `Stream` of decoded Tlog20Codec::Items (`f64`)
     // and returns a future that represents this processing until the end of time.
     // We can only spawn `Future<Item = (), Error = ()>`.
-    let serialfuture = serial
+    let serialfuture = serial_read
         .for_each(move |ts| {
             // New Item arrived
 
@@ -61,38 +63,41 @@ pub fn init_serial_port(
             }
 
             // save into shared data
-            (*shared_clone).temperatures.set(ts.1);
+            shared_clone.temperatures.set(ts.1);
 
             // This closure must return a future `Future<Item = (), Error = Tlog20Codec::Error>`.
             // `for_each` will run this future to completion before processing the next item.
             // But we can simply return an empty future.
-            ok(())
+            future::ok(())
         })
-        .or_else(|_e| {
+        .or_else(move |_e| {
             // Map the error type to `()`, but at least print the error.
             error!("NANOEXT decoder error: {:?}", _e);
             // Will maybe spawn a new Nanoext
-            error_sink.send(ErrorEvent::NanoExtDecoderError).wait().ok();
-            err(())
+            shared_clone2.handle_error_async(ErrorEvent::NanoExtDecoderError);
+            future::err(())
         });
 
 
-    reactor_handle.spawn(serialfuture.map_err(|_| ()));
+    shared.handle().spawn(serialfuture.map_err(|_| ()));
 
-    Ok(())
+    Ok(serial_write)
 }
 
 
+pub enum NanoExtCommand {
+    PowerOn,
+    PowerOff,
+}
 
 
-
-struct SerialCodec {
+pub struct NanoextCodec {
     past: VecDeque<[u32; 6]>,
 }
 
-impl SerialCodec {
-    fn new() -> SerialCodec {
-        SerialCodec {
+impl NanoextCodec {
+    fn new() -> NanoextCodec {
+        NanoextCodec {
             past: VecDeque::with_capacity(100),
         }
     }
@@ -154,7 +159,7 @@ impl SerialCodec {
     }
 }
 
-impl Decoder for SerialCodec {
+impl Decoder for NanoextCodec {
     type Item = (Temperatures, TemperatureStats);
     type Error = Error;
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -199,10 +204,14 @@ impl Decoder for SerialCodec {
     }
 }
 
-impl Encoder for SerialCodec {
-    type Item = String;
+impl Encoder for NanoextCodec {
+    type Item = NanoExtCommand;
     type Error = Error;
-    fn encode(&mut self, _item: Self::Item, _dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        match item {
+            NanoExtCommand::PowerOn => dst.put_u8(b'1'),
+            NanoExtCommand::PowerOff => dst.put_u8(b'0'),
+        }
         Ok(())
     }
 }

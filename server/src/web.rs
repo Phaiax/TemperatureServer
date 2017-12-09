@@ -1,7 +1,7 @@
 
 use failure::Error;
 
-use shared::SharedDataRc;
+use Shared;
 
 use hyper::server::{Http, NewService, Request, Response, Server, Service};
 use hyper::header::ContentLength;
@@ -10,7 +10,7 @@ use futures::future::Future;
 use futures;
 
 
-pub fn make_web_server(shared: &SharedDataRc) -> Server<HelloWorldSpawner, ::hyper::Body> {
+pub fn make_web_server(shared: &Shared) -> Server<HelloWorldSpawner, ::hyper::Body> {
     let addr = "0.0.0.0:12345".parse().unwrap();
     Http::new()
         .bind(
@@ -23,7 +23,7 @@ pub fn make_web_server(shared: &SharedDataRc) -> Server<HelloWorldSpawner, ::hyp
 }
 
 pub struct HelloWorldSpawner {
-    shared: SharedDataRc,
+    shared: Shared,
 }
 
 impl NewService for HelloWorldSpawner {
@@ -39,7 +39,7 @@ impl NewService for HelloWorldSpawner {
 }
 
 pub struct HelloWorld {
-    shared: SharedDataRc,
+    shared: Shared,
 }
 
 impl Service for HelloWorld {
