@@ -22,7 +22,7 @@ use tokio_serial::{BaudRate, DataBits, FlowControl, Parity, Serial, SerialPort,
 
 use bytes::BytesMut;
 
-use Shared;
+use shared::Shared;
 use temp::{TemperatureStats, Temperatures};
 use TLOG20_SERIAL_DEVICE;
 

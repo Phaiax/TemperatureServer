@@ -20,9 +20,9 @@ use bytes::BytesMut;
 use bytes::buf::BufMut;
 
 use temp::{TemperatureStats, Temperatures};
-use Shared;
+use shared::Shared;
 use NANOEXT_SERIAL_DEVICE;
-use ErrorEvent;
+use Event;
 
 pub type NanoextCommandSink = SplitSink<Framed<Serial, NanoextCodec>>;
 
@@ -74,7 +74,7 @@ pub fn init_serial_port(shared: Shared) -> Result<NanoextCommandSink, Error>  {
             // Map the error type to `()`, but at least print the error.
             error!("NANOEXT decoder error: {:?}", _e);
             // Will maybe spawn a new Nanoext
-            shared_clone2.handle_error_async(ErrorEvent::NanoExtDecoderError);
+            shared_clone2.handle_event_async(Event::NanoExtDecoderError);
             future::err(())
         });
 

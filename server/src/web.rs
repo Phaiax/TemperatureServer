@@ -1,7 +1,7 @@
 
 use failure::Error;
 
-use Shared;
+use shared::Shared;
 
 use hyper::server::{Http, NewService, Request, Response, Server, Service};
 use hyper::header::ContentLength;
