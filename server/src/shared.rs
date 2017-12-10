@@ -9,7 +9,7 @@ use futures::unsync::mpsc;
 use failure::Error;
 
 use Event;
-use db::Db;
+use filedb::FileDb;
 
 
 pub type Shared = Rc<SharedInner>;
@@ -20,10 +20,10 @@ pub struct SharedInner {
     pending_nanoext_command : RefCell<Option<NanoExtCommand>>,
     nanoext_command_sink: RefCell<Option<NanoextCommandSink>>,
     reactor_handle: RefCell<Option<Handle>>,
-    db : Db,
+    db : FileDb,
 }
 
-pub fn setup_shared(event_sink : mpsc::Sender<Event>, db : Db) -> Shared {
+pub fn setup_shared(event_sink : mpsc::Sender<Event>, db : FileDb) -> Shared {
 
     Rc::new(SharedInner {
         temperatures: Cell::new(TemperatureStats::default()),

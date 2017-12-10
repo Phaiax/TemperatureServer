@@ -36,7 +36,6 @@ void disablePullup(int analogPin) {
 
 void setup()
 {
-	return;
   pinMode(2, OUTPUT); // -> Analog7  oben
   pinMode(3, OUTPUT); // -> Analog6
   pinMode(4, OUTPUT); // -> Analog5
@@ -123,8 +122,6 @@ void check_command() {
 void loop()
 {
 
-delay(20);
-return;
   readTemperatures(); // ~500 ms
 
   delay(20);

@@ -18,7 +18,9 @@ failure = "*"
 lazy_static = "1.0"
 log = "0.3"
 env_logger = "0.4.3"
-chrono = "0.4"
-diesel = { version = "1.0.0-beta1", features = ["sqlite", "chrono"] }
-diesel_infer_schema = { version = "1.0.0-beta1", features = ["sqlite"] }
+chrono = { version = "0.4", features = ["serde"] }
 dotenv = "0.10.0"
+rmp-serde = "0.13.7"
+serde = "1.0.24"
+serde_derive = "1.0.24"
+regex = "0.2"

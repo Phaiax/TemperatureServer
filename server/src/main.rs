@@ -3,12 +3,9 @@
 
 extern crate bytes;
 extern crate chrono;
-#[macro_use]
-extern crate diesel;
-#[macro_use]
-extern crate diesel_infer_schema;
 extern crate dotenv;
 extern crate env_logger;
+#[macro_use]
 extern crate failure;
 extern crate futures;
 extern crate futures_cpupool;
@@ -21,13 +18,18 @@ extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_serial;
 extern crate tokio_signal;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate rmp_serde as rmps;
+extern crate regex;
 
 mod nanoext;
 mod web;
 mod temp;
 mod tlog20;
 mod shared;
-mod db;
+mod filedb;
 
 use std::sync::RwLock;
 use std::rc::Rc;
@@ -55,7 +57,7 @@ use temp::TemperatureStats;
 
 use shared::{setup_shared, Shared, SharedInner};
 
-use db::Db;
+use filedb::FileDb;
 
 pub const NANOEXT_SERIAL_DEVICE: &'static str =
     "/dev/serial/by-id/usb-1a86_USB2.0-Serial-if00-port0";
@@ -98,7 +100,7 @@ fn run() -> Result<(), Error> {
     let (event_sink, event_stream) = mpsc::channel::<Event>(1);
 
     // Open Database and create thread for asyncronity
-    let db = Db::establish_connection()?;
+    let db = FileDb::establish_connection()?;
 
     // Setup shared data (Handle and CommandSink still missing)
     let shared = setup_shared(event_sink, db);
