@@ -1,6 +1,6 @@
 
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use failure::{err_msg, Error, ResultExt};
 
@@ -59,6 +59,7 @@ pub fn init_serial_port(shared: Shared) -> Result<NanoextCommandSink, Error>  {
             every_i += 1;
             if every_i == 10 {
                 info!("{:?}", ts.1);
+                shared_clone.handle_event_async(Event::NewTemperatures);
                 every_i = 0;
             }
 

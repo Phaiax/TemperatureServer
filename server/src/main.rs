@@ -1,10 +1,17 @@
 #![allow(unused_imports)]
+#![recursion_limit="128"]
 
 extern crate bytes;
 extern crate chrono;
+#[macro_use]
+extern crate diesel;
+#[macro_use]
+extern crate diesel_infer_schema;
+extern crate dotenv;
 extern crate env_logger;
 extern crate failure;
 extern crate futures;
+extern crate futures_cpupool;
 extern crate hyper;
 #[macro_use]
 extern crate lazy_static;
@@ -20,6 +27,7 @@ mod web;
 mod temp;
 mod tlog20;
 mod shared;
+mod db;
 
 use std::sync::RwLock;
 use std::rc::Rc;
@@ -28,6 +36,7 @@ use std::env;
 
 use log::{LogLevelFilter, LogRecord};
 use env_logger::{LogBuilder, LogTarget};
+use dotenv::dotenv;
 
 use futures::{future, Future};
 use futures::Stream;
@@ -44,7 +53,9 @@ use chrono::prelude::*;
 use nanoext::{NanoExtCommand, NanoextCommandSink};
 use temp::TemperatureStats;
 
-use shared::{Shared, SharedInner, setup_shared};
+use shared::{setup_shared, Shared, SharedInner};
+
+use db::Db;
 
 pub const NANOEXT_SERIAL_DEVICE: &'static str =
     "/dev/serial/by-id/usb-1a86_USB2.0-Serial-if00-port0";
@@ -54,16 +65,22 @@ pub const NANOEXT_RESPAWN_COUNT: u32 = 5;
 
 pub const STDIN_BUFFER_SIZE: usize = 1000;
 
+// pub const TEMPERATURE_STORAGE_INTERVAL_SECONDS : usize
+
 
 pub enum Event {
     NanoExtDecoderError,
     CtrlC,
+    NewTemperatures,
 }
 
 
 fn main() {
     // Init logging
     init_logger();
+
+    // Sync environment from .env
+    dotenv().ok();
 
     match run() {
         Ok(()) => {}
@@ -74,15 +91,17 @@ fn main() {
 }
 
 fn run() -> Result<(), Error> {
-
     // Oneshot to exit event loop
     let (shutdown_trigger, shutdown_shot) = setup_shutdown_oneshot();
 
     // Channel to the high-level event loop (see `handle_events()`)
     let (event_sink, event_stream) = mpsc::channel::<Event>(1);
 
+    // Open Database and create thread for asyncronity
+    let db = Db::establish_connection()?;
+
     // Setup shared data (Handle and CommandSink still missing)
-    let shared = setup_shared(event_sink);
+    let shared = setup_shared(event_sink, db);
 
     // Hyper will create the tokio core / reactor ...
     let server = web::make_web_server(&shared);
@@ -96,7 +115,8 @@ fn run() -> Result<(), Error> {
 
     // Now connect to the TLOG20, but do not fail if not present
     tlog20::init_serial_port(shared.clone())
-        .map_err(|e| error!("{}", e) ) .ok();
+        .map_err(|e| error!("{}", e))
+        .ok();
 
     // Handle SIG_INT
     setup_ctrlc_forwarding(shared.clone());
@@ -147,7 +167,9 @@ fn setup_shutdown_oneshot() -> (ShutdownTrigger, ShutdownShot) {
     // wrap trigger in closure that abstracts the consuming behaviour of send
     let mut shutdown_trigger = Some(shutdown_trigger);
     let shutdown_trigger = Box::new(move || {
-        shutdown_trigger.take().map(|s_t| s_t.send(()).ok() /* no future involved here */ );
+        shutdown_trigger
+            .take()
+            .map(|s_t| s_t.send(()).ok() /* no future involved here */);
     });
     (shutdown_trigger, shutdown_shot)
 }
@@ -169,6 +191,7 @@ fn handle_events(
 
     let error_handler = error_stream.for_each(move |error| {
         match error {
+            Event::NewTemperatures => {}
             // A Error in the NanoExt. Try to respawn max 5 times.
             Event::NanoExtDecoderError => if respawn_count == 0 {
                 error!("Respawned {} times. Shutdown now.", NANOEXT_RESPAWN_COUNT);
@@ -218,25 +241,29 @@ fn setup_ctrlc_forwarding(shared: Shared) {
 
 
 fn setup_stdin_handling(shared: Shared) {
-
     let stdin_stream = tokio_stdin::spawn_stdin_stream();
 
     let shared1 = shared.clone();
 
-    let prog = stdin_stream.for_each(move |line| {
-        match line.as_str() {
-            "rc" => {
-                info!("Strong count of shared: {}", ::std::rc::Rc::strong_count(&shared1));
-            },
-            "1" => shared1.send_command_async(NanoExtCommand::PowerOn, shared1.clone()),
-            "0" => shared1.send_command_async(NanoExtCommand::PowerOff, shared1.clone()),
-            _ => {},
-        }
-        future::ok(())
-    }).map_err(|e| {
-        debug!("StdIn canceld: {:?}", e);
-        ()
-    });
+    let prog = stdin_stream
+        .for_each(move |line| {
+            match line.as_str() {
+                "rc" => {
+                    info!(
+                        "Strong count of shared: {}",
+                        ::std::rc::Rc::strong_count(&shared1)
+                    );
+                }
+                "1" => shared1.send_command_async(NanoExtCommand::PowerOn, shared1.clone()),
+                "0" => shared1.send_command_async(NanoExtCommand::PowerOff, shared1.clone()),
+                _ => {}
+            }
+            future::ok(())
+        })
+        .map_err(|e| {
+            debug!("StdIn canceld: {:?}", e);
+            ()
+        });
 
     shared.spawn(prog);
 }
@@ -247,7 +274,7 @@ mod tokio_stdin {
 
     use futures::stream::iter_result;
     use futures::{Future, Sink, Stream};
-    use futures::sync::mpsc::{Receiver, SendError, channel};
+    use futures::sync::mpsc::{channel, Receiver, SendError};
     use std::io::{self, BufRead};
     use std::thread;
 
@@ -261,7 +288,6 @@ mod tokio_stdin {
     }
 
     pub fn spawn_stdin_stream() -> StdInStream {
-
         let (channel_sink, channel_stream) = channel(super::STDIN_BUFFER_SIZE);
 
         let stdin_sink = channel_sink.sink_map_err(StdinError::Channel);

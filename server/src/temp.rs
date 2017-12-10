@@ -9,7 +9,7 @@ fn raw2celsius_single(raw: f64, a: f64, b: f64, c: f64) -> f64 {
     return T;
 }
 
-fn raw2celsius(raw: &[f64; 6]) -> [f64; 6] {
+pub fn raw2celsius(raw: &[f64; 6]) -> [f64; 6] {
     [
         raw2celsius_single(raw[0], 1.08067787e-02, -1.09703050e-03, 3.39993112e-06),
         raw2celsius_single(raw[1], 1.26655441e-02, -1.33464022e-03, 3.97068257e-06),
