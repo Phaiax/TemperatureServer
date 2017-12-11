@@ -1,5 +1,5 @@
 #![allow(unused_imports)]
-#![recursion_limit="128"]
+#![recursion_limit = "128"]
 
 extern crate bytes;
 extern crate chrono;
@@ -12,18 +12,18 @@ extern crate futures_cpupool;
 extern crate hyper;
 #[macro_use]
 extern crate lazy_static;
+extern crate libc;
 #[macro_use]
 extern crate log;
+extern crate regex;
+extern crate rmp_serde as rmps;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_serial;
 extern crate tokio_signal;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate rmp_serde as rmps;
-extern crate regex;
-extern crate libc;
 
 mod nanoext;
 mod web;
@@ -36,6 +36,7 @@ use std::sync::RwLock;
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
 use std::env;
+use std::time::Duration;
 
 use log::{LogLevelFilter, LogRecord};
 use env_logger::{LogBuilder, LogTarget};
@@ -47,7 +48,7 @@ use futures::unsync::mpsc;
 use futures::unsync::oneshot;
 use futures::Sink;
 
-use tokio_core::reactor::Handle;
+use tokio_core::reactor::{Handle, Interval};
 
 use failure::Error;
 
@@ -101,7 +102,7 @@ fn run() -> Result<(), Error> {
     let (event_sink, event_stream) = mpsc::channel::<Event>(1);
 
     // Open Database and create thread for asyncronity
-    let db = FileDb::establish_connection(true)?;
+    let db = FileDb::establish_connection()?;
 
     // Setup shared data (Handle and CommandSink still missing)
     let shared = setup_shared(event_sink, db);
@@ -131,12 +132,18 @@ fn run() -> Result<(), Error> {
     // Events can be sent via `shared.handle_event_async()`
     handle_events(shared.clone(), event_stream, shutdown_trigger);
 
+    // save regulary
+    setup_db_save_interval(Duration::from_secs(10), shared.clone());
+
     info!("START EVENT LOOP!");
 
     // Start Webserver and block until shutdown is triggered
     server.run_until(shutdown_shot.map_err(|_| ())).unwrap();
 
-    info!("SHUTDOWN!");
+    // save on shutdown
+    shared.db().save_all().wait().unwrap();
+
+    info!("SHUTDOWN! {}", Rc::strong_count(&shared));
 
     Ok(())
 }
@@ -194,7 +201,12 @@ fn handle_events(
 
     let error_handler = error_stream.for_each(move |error| {
         match error {
-            Event::NewTemperatures => {}
+            Event::NewTemperatures => {
+                let future = shared1
+                    .db()
+                    .insert_or_update_async(shared1.temperatures.get());
+                shared1.spawn(future.then(|_| future::ok(())));
+            }
             // A Error in the NanoExt. Try to respawn max 5 times.
             Event::NanoExtDecoderError => if respawn_count == 0 {
                 error!("Respawned {} times. Shutdown now.", NANOEXT_RESPAWN_COUNT);
@@ -226,6 +238,15 @@ fn handle_events(
     shared.spawn(error_handler);
 }
 
+pub fn setup_db_save_interval(interval: Duration, shared: Shared) {
+    let shared1 = shared.clone();
+    let prog = Interval::new(interval, &shared.handle()).unwrap().for_each(move |_| {
+        let prog = shared1.db().save_all();
+        shared1.spawn(prog.map_err(|e| { error!("Error while saving db: {}", e); () } ));
+        future::ok(())
+    });
+    shared.spawn(prog.then(|_| future::ok(())));
+}
 
 /// Handle Ctrl+c aka SIG_INT
 fn setup_ctrlc_forwarding(shared: Shared) {

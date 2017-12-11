@@ -11,11 +11,9 @@ use std::path::{Path, PathBuf};
 use std::fs::{self, read_dir, File};
 use std::io::{BufReader, BufWriter};
 use std::io::prelude::*;
-
-use libc::{getpid, kill};
+use std::time::Duration;
 
 use futures::{future, Future};
-
 use futures_cpupool::{CpuFuture, CpuPool};
 
 use failure::{err_msg, Error, ResultExt};
@@ -234,48 +232,35 @@ pub struct FileDb {
     chunks: Arc<Mutex<Chunks>>,
     path_base: PathBuf,
     pool: CpuPool,
-    lockfile: PathBuf,
+    lockfile: (File, PathBuf),
 }
 
 
 impl FileDb {
-    pub fn establish_connection(
-        remove_dblockfile_if_pid_not_present: bool,
-    ) -> Result<FileDb, Error> {
+    pub fn establish_connection() -> Result<FileDb, Error> {
         let database_url: PathBuf = env::var("LOG_FOLDER")
             .context("Environment variable LOG_FOLDER must be set.")?
             .into();
 
-        let lockfile = database_url.join("pid.dblock");
 
-        if lockfile.is_file() {
-            let mut file = File::open(&lockfile)?;
-            let mut other_pid = String::new();
-            file.read_to_string(&mut other_pid)?;
-            let pid = other_pid
-                .parse::<i32>()
-                .context("Could not parse pid in existing Database lock file.")?;
-            if unsafe { kill(pid, 0) } == 0 {
-                // process exists
-                bail!(
-                    "Database lock file was created by pid {} and that pid exists.",
-                    pid
-                );
-            } else if remove_dblockfile_if_pid_not_present {
-                // should be safe to delete the lock
-                fs::remove_file(&lockfile)?;
-            }
+        let lockfilepath = database_url.join("pid.dblock");
+
+        let mut lockfile = if lockfilepath.is_file() {
+            File::open(&lockfilepath)?
+        } else {
+            File::create(&lockfilepath)?
+        };
+        let pid = unsafe { ::libc::getpid() } as i32;
+        write!(lockfile, "{}", pid)?;
+        lockfile.sync_all()?;
+
+        use std::os::unix::io::AsRawFd;
+        let fd = lockfile.as_raw_fd() as i32 as ::libc::c_int;
+        if unsafe { ::libc::flock(fd, ::libc::LOCK_EX) } as i32 == 0 {
+            // success
+        } else {
+            bail!("Could not set database lock.")
         }
-
-        let pid = unsafe { getpid() } as i32;
-
-        {
-            let mut file = File::create(&lockfile)?;
-            write!(file, "{}", pid)?;
-            file.sync_all()?;
-            // drop file
-        }
-
 
         let pool = CpuPool::new(2);
 
@@ -288,7 +273,7 @@ impl FileDb {
             pool,
             chunks: Arc::new(Mutex::new(chunks)),
             path_base: database_url,
-            lockfile,
+            lockfile: (lockfile, lockfilepath),
         })
     }
 
@@ -345,12 +330,18 @@ impl FileDb {
         }
     }
 
-    pub fn save_all(&self) -> Result<(), Error> {
-        let chunks = self.chunks.lock().unwrap();
-        for (ref date, ref chunk) in (*chunks).iter() {
-            chunk.lock().unwrap().sync_to_disk()?;
-        }
-        Ok(())
+    pub fn save_all(&self) -> CpuFuture<(), Error> {
+        let chunks = self.chunks.clone();
+
+        let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
+            let chunks = chunks.lock().unwrap();
+            for (ref date, ref chunk) in (*chunks).iter() {
+                chunk.lock().unwrap().sync_to_disk()?;
+            }
+            Ok(())
+        }));
+
+        self.pool.spawn(f)
     }
 
 
@@ -440,12 +431,22 @@ impl FileDb {
 
 impl Drop for FileDb {
     fn drop(&mut self) {
-        self.save_all().map_err(|e| error!("{}", e)).ok();
-        fs::remove_file(&self.lockfile)
+        self.save_all().wait().map_err(|e| error!("{}", e)).ok();
+
+        use std::os::unix::io::AsRawFd;
+        let fd = self.lockfile.0.as_raw_fd() as i32 as ::libc::c_int;
+        if unsafe { ::libc::flock(fd, ::libc::LOCK_UN) } as i32 == 0 {
+            // success
+        } else {
+            error!("Could not remove database lock.");
+        }
+
+        fs::remove_file(&self.lockfile.1)
             .map_err(|e| error!("{}", e))
             .ok();
     }
 }
+
 
 #[cfg(test)]
 mod test {
@@ -453,7 +454,7 @@ mod test {
 
     fn clear_db() {
         ::dotenv::dotenv().ok();
-        let db = FileDb::establish_connection(false).unwrap();
+        let db = FileDb::establish_connection().unwrap();
         db.clear_all_data_ondisk_and_in_memory().unwrap();
     }
 
@@ -464,7 +465,7 @@ mod test {
 
         clear_db();
 
-        let db = FileDb::establish_connection(false).unwrap();
+        let db = FileDb::establish_connection().unwrap();
 
         let date = Local::now().naive_local().date();
 
@@ -503,7 +504,7 @@ mod test {
 
         // write to disk on drop
         assert!(!data_file.is_file());
-        db.save_all().unwrap();
+        db.save_all().wait().unwrap();
 
         drop(db);
         assert!(!lockfile.is_file());
@@ -511,7 +512,7 @@ mod test {
         let date_created = data_file.metadata().unwrap().modified().unwrap();
 
         // reopen and reread data
-        let db = FileDb::establish_connection(false).unwrap();
+        let db = FileDb::establish_connection().unwrap();
         let and_back = db.get_by_datetime(data.time).wait().unwrap().unwrap();
         assert!(and_back.mean == mean_u);
         drop(db);
@@ -525,7 +526,7 @@ mod test {
         assert!(!lockfile.is_file());
 
         // reopen and reread data should fail
-        let db = FileDb::establish_connection(false).unwrap();
+        let db = FileDb::establish_connection().unwrap();
         assert!(db.get_by_datetime(data.time).wait().unwrap().is_none());
     }
 

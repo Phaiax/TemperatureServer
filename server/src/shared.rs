@@ -85,6 +85,10 @@ impl SharedInner {
         }
     }
 
+    pub fn db(&self) -> &FileDb {
+        &self.db
+    }
+
     /// Asyncronously send a command to the nanoext.
     ///
     /// This will temporary comsume the sink and use the `pending_nanoext_command`
