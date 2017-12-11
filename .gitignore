@@ -2,3 +2,4 @@ nanoext/.pioenvs
 nanoext/.piolibdeps
 *.pyc
 server/target
+server/log

@@ -23,6 +23,7 @@ extern crate serde;
 extern crate serde_derive;
 extern crate rmp_serde as rmps;
 extern crate regex;
+extern crate libc;
 
 mod nanoext;
 mod web;
@@ -100,7 +101,7 @@ fn run() -> Result<(), Error> {
     let (event_sink, event_stream) = mpsc::channel::<Event>(1);
 
     // Open Database and create thread for asyncronity
-    let db = FileDb::establish_connection()?;
+    let db = FileDb::establish_connection(true)?;
 
     // Setup shared data (Handle and CommandSink still missing)
     let shared = setup_shared(event_sink, db);
@@ -140,7 +141,7 @@ fn run() -> Result<(), Error> {
     Ok(())
 }
 
-fn init_logger() {
+pub fn init_logger() {
     let format = |record: &LogRecord| {
         let local: DateTime<Local> = Local::now();
         format!(

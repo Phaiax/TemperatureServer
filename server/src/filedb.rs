@@ -8,13 +8,15 @@ use std::sync::{Mutex, MutexGuard};
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::fs::{read_dir, File};
+use std::fs::{self, read_dir, File};
 use std::io::{BufReader, BufWriter};
 use std::io::prelude::*;
 
+use libc::{getpid, kill};
+
 use futures::{future, Future};
 
-use futures_cpupool::{CpuPool, CpuFuture};
+use futures_cpupool::{CpuFuture, CpuPool};
 
 use failure::{err_msg, Error, ResultExt};
 
@@ -28,11 +30,51 @@ use serde::{Deserialize, Serialize};
 
 use regex::Regex;
 
+/// This is 50 bytes when serialized as messagepack
+/// When written for each second a day, then the daily file has size 4MB
+/// When written for each minute a day, then the daily file has size 72KB
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Data {
+    #[serde(serialize_with = "naivedatetime_as_intint",
+            deserialize_with = "intint_as_naivedatetime")]
     pub time: NaiveDateTime,
-    pub mean: [f64; 6],
-    pub celsius: [f64; 6],
+    pub mean: [u16; 6],
+    pub celsius: [i16; 6],
+}
+
+fn naivedatetime_as_intint<S>(data: &NaiveDateTime, ser: S) -> Result<S::Ok, S::Error>
+where
+    S: ::serde::Serializer,
+{
+    use serde::ser::SerializeTuple;
+    let mut tup = ser.serialize_tuple(2)?;
+    tup.serialize_element(&data.timestamp())?;
+    tup.serialize_element(&data.timestamp_subsec_nanos())?;
+    tup.end()
+}
+
+struct IntIntVisitor;
+impl<'de> ::serde::de::Visitor<'de> for IntIntVisitor {
+    type Value = NaiveDateTime;
+    fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(formatter, "two integers")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: ::serde::de::SeqAccess<'de>,
+    {
+        let secs = seq.next_element::<i64>()?.unwrap();
+        let nanos = seq.next_element::<i64>()?.unwrap();
+        Ok(NaiveDateTime::from_timestamp(secs, nanos as u32))
+    }
+}
+
+fn intint_as_naivedatetime<'de, D>(deser: D) -> Result<NaiveDateTime, D::Error>
+where
+    D: ::serde::Deserializer<'de>,
+{
+    deser.deserialize_tuple(2, IntIntVisitor)
 }
 
 
@@ -96,7 +138,7 @@ impl Chunk {
 
             self.sync_serialized()?;
 
-            let mut file = File::open(&self.path)?;
+            let mut file = File::create(&self.path)?;
             file.write_all(&self.serialized.as_ref().unwrap()[..])?;
 
             self.disk_is_up_to_date = true;
@@ -192,13 +234,48 @@ pub struct FileDb {
     chunks: Arc<Mutex<Chunks>>,
     path_base: PathBuf,
     pool: CpuPool,
+    lockfile: PathBuf,
 }
 
 
 impl FileDb {
-    pub fn establish_connection() -> Result<FileDb, Error> {
-        let database_url =
-            env::var("LOG_FOLDER").context("Environment variable LOG_FOLDER must be set.")?;
+    pub fn establish_connection(
+        remove_dblockfile_if_pid_not_present: bool,
+    ) -> Result<FileDb, Error> {
+        let database_url: PathBuf = env::var("LOG_FOLDER")
+            .context("Environment variable LOG_FOLDER must be set.")?
+            .into();
+
+        let lockfile = database_url.join("pid.dblock");
+
+        if lockfile.is_file() {
+            let mut file = File::open(&lockfile)?;
+            let mut other_pid = String::new();
+            file.read_to_string(&mut other_pid)?;
+            let pid = other_pid
+                .parse::<i32>()
+                .context("Could not parse pid in existing Database lock file.")?;
+            if unsafe { kill(pid, 0) } == 0 {
+                // process exists
+                bail!(
+                    "Database lock file was created by pid {} and that pid exists.",
+                    pid
+                );
+            } else if remove_dblockfile_if_pid_not_present {
+                // should be safe to delete the lock
+                fs::remove_file(&lockfile)?;
+            }
+        }
+
+        let pid = unsafe { getpid() } as i32;
+
+        {
+            let mut file = File::create(&lockfile)?;
+            write!(file, "{}", pid)?;
+            file.sync_all()?;
+            // drop file
+        }
+
 
         let pool = CpuPool::new(2);
 
@@ -210,7 +287,8 @@ impl FileDb {
         Ok(FileDb {
             pool,
             chunks: Arc::new(Mutex::new(chunks)),
-            path_base: database_url.into(),
+            path_base: database_url,
+            lockfile,
         })
     }
 
@@ -261,9 +339,7 @@ impl FileDb {
         if chunks.contains_key(&date) {
             chunks.get(&date).unwrap().clone()
         } else {
-            let new_chunk = Arc::new(Mutex::new(
-                Chunk::new(Self::get_filepath(date, &path_base)),
-            ));
+            let new_chunk = Arc::new(Mutex::new(Chunk::new(Self::get_filepath(date, &path_base))));
             chunks.insert(date, Arc::clone(&new_chunk));
             new_chunk
         }
@@ -278,30 +354,34 @@ impl FileDb {
     }
 
 
-    fn result_to_future<T, E : Display>(res : Result<T, E>) -> future::FutureResult<T, E> {
+    fn result_to_future<T, E: Display>(res: Result<T, E>) -> future::FutureResult<T, E> {
         match res {
-            Ok(d) => future::ok::<T,E>(d),
+            Ok(d) => future::ok::<T, E>(d),
             Err(e) => {
                 error!("DB Error {}", e);
-                future::err::<T,E>(e)
+                future::err::<T, E>(e)
             }
         }
     }
 
-    pub fn insert_or_update_async(&self, data: TemperatureStats) -> CpuFuture<Data, Error> {
-
+    pub fn insert_or_update_async(&self, data0: TemperatureStats) -> CpuFuture<Data, Error> {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
-        let data = Data {
+        let mut data = Data {
             time: Local::now().naive_local(),
-            mean: data.mean,
-            celsius: raw2celsius(&data.mean),
+            mean: [0; 6],
+            celsius: ::temp::raw2celsius100(&data0.mean),
         };
+        data.mean.iter_mut().zip(data0.mean.iter()).for_each(|(i,m)| *i = *m as u16);
 
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let date = data.time.date();
             let chunk = Self::get_or_create_by_date(&chunks, date, path_base);
-            let r = chunk.lock().unwrap().insert_or_update(data.clone()).map(|_| data);
+            let r = chunk
+                .lock()
+                .unwrap()
+                .insert_or_update(data.clone())
+                .map(|_| data);
             Self::result_to_future(r)
         }));
 
@@ -309,8 +389,7 @@ impl FileDb {
         // forget() keeps the pool running but forgets the CpuFuture
     }
 
-    pub fn get_serialized_by_date(&self, date : NaiveDate) -> CpuFuture<Arc<Vec<u8>>, Error> {
-
+    pub fn get_serialized_by_date(&self, date: NaiveDate) -> CpuFuture<Arc<Vec<u8>>, Error> {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
 
@@ -324,8 +403,7 @@ impl FileDb {
     }
 
 
-    pub fn get_by_date(&self, date : NaiveDate) -> CpuFuture<Arc<Vec<Data>>, Error> {
-
+    pub fn get_by_date(&self, date: NaiveDate) -> CpuFuture<Arc<Vec<Data>>, Error> {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
 
@@ -338,8 +416,7 @@ impl FileDb {
         self.pool.spawn(f)
     }
 
-    pub fn get_by_datetime(&self, time : NaiveDateTime) -> CpuFuture<Option<Data>, Error> {
-
+    pub fn get_by_datetime(&self, time: NaiveDateTime) -> CpuFuture<Option<Data>, Error> {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
 
@@ -352,26 +429,105 @@ impl FileDb {
         self.pool.spawn(f)
     }
 
+    pub fn clear_all_data_ondisk_and_in_memory(self) -> Result<(), Error> {
+        let mut chunks = self.chunks.lock().unwrap();
+        for (date, chunk) in chunks.drain() {
+            fs::remove_file(Self::get_filepath(date, &self.path_base))?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for FileDb {
+    fn drop(&mut self) {
+        self.save_all().map_err(|e| error!("{}", e)).ok();
+        fs::remove_file(&self.lockfile)
+            .map_err(|e| error!("{}", e))
+            .ok();
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
 
+    fn clear_db() {
+        ::dotenv::dotenv().ok();
+        let db = FileDb::establish_connection(false).unwrap();
+        db.clear_all_data_ondisk_and_in_memory().unwrap();
+    }
+
     #[test]
     fn test_db() {
         ::dotenv::dotenv().ok();
-        let db = FileDb::establish_connection().unwrap();
+        ::init_logger();
+
+        clear_db();
+
+        let db = FileDb::establish_connection(false).unwrap();
+
+        let date = Local::now().naive_local().date();
 
         let temp = TemperatureStats {
             mean: [500., 600., 500., 400., 500., 700.],
             std_dev: [0., 0., 0., 0., 0., 0.],
         };
+        // as u16 for comparision
+        let mean_u = [500, 600, 500, 400, 500, 700];
 
         let pooloperation = db.insert_or_update_async(temp);
         let data = pooloperation.wait().unwrap();
+        assert!(data.mean == mean_u);
 
-        assert!(data.mean == temp.mean);
+        // Add entry while holding the vec (so the vec must be cloned)
+        let vec = db.get_by_date(date).wait().unwrap();
+        assert!(vec[0].mean == mean_u);
+        db.insert_or_update_async(temp).wait().unwrap();
+        assert!(vec.len() == 1);
+        let vec = db.get_by_date(date).wait().unwrap();
+        assert!(vec.len() == 2);
 
+
+        let and_back = db.get_by_datetime(data.time).wait().unwrap().unwrap();
+        assert!(and_back.mean == mean_u);
+
+
+        // lock file exists
+        let database_url: PathBuf = env::var("LOG_FOLDER").unwrap().into();
+        let lockfile = database_url.join("pid.dblock");
+        assert!(lockfile.is_file());
+
+        // data-file
+        let data_file =
+            database_url.join(Path::new(&format!("chunk-{}.db", date.format("%Y-%m-%d"))));
+
+        // write to disk on drop
+        assert!(!data_file.is_file());
+        db.save_all().unwrap();
+
+        drop(db);
+        assert!(!lockfile.is_file());
+        assert!(data_file.is_file());
+        let date_created = data_file.metadata().unwrap().modified().unwrap();
+
+        // reopen and reread data
+        let db = FileDb::establish_connection(false).unwrap();
+        let and_back = db.get_by_datetime(data.time).wait().unwrap().unwrap();
+        assert!(and_back.mean == mean_u);
+        drop(db);
+        // we had no changes, so the file should not have been saved again
+        let date_no_modification = data_file.metadata().unwrap().modified().unwrap();
+        assert_eq!(date_created, date_no_modification);
+
+        // clear db
+        clear_db();
+        assert!(!data_file.is_file());
+        assert!(!lockfile.is_file());
+
+        // reopen and reread data should fail
+        let db = FileDb::establish_connection(false).unwrap();
+        assert!(db.get_by_datetime(data.time).wait().unwrap().is_none());
     }
+
+
 }
