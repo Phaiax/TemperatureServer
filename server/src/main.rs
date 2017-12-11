@@ -49,6 +49,7 @@ use futures::unsync::oneshot;
 use futures::Sink;
 
 use tokio_core::reactor::{Handle, Interval};
+use tokio_signal::unix::Signal;
 
 use failure::Error;
 
@@ -75,6 +76,7 @@ pub const STDIN_BUFFER_SIZE: usize = 1000;
 pub enum Event {
     NanoExtDecoderError,
     CtrlC,
+    SigTerm,
     NewTemperatures,
 }
 
@@ -127,6 +129,9 @@ fn run() -> Result<(), Error> {
 
     // Handle stdin. Command interpreting occours here.
     setup_stdin_handling(shared.clone());
+
+    // Handle SIGTERM for service
+    setup_sigterm_forwarding(shared.clone());
 
     // Handle events, including error events and do restart serial port.
     // Events can be sent via `shared.handle_event_async()`
@@ -229,6 +234,10 @@ fn handle_events(
             Event::CtrlC => {
                 info!("Ctrl-c received.");
                 shutdown_trigger();
+            },
+            Event::SigTerm => {
+                info!("SIGTERM received.");
+                shutdown_trigger();
             }
         }
 
@@ -257,6 +266,19 @@ fn setup_ctrlc_forwarding(shared: Shared) {
     // Process each ctrl-c as it comes in
     let prog = ctrl_c.for_each(move |_| {
         shared1.handle_event_async(Event::CtrlC);
+        future::ok(())
+    });
+
+    shared.spawn(prog.map_err(|_| ()));
+}
+
+fn setup_sigterm_forwarding(shared: Shared) {
+    let shared1 = shared.clone();
+
+    let prog = Signal::new(::libc::SIGTERM, &shared.handle()).map(|x| {
+        Box::new(x.map(|_| ()))
+    }).flatten_stream().for_each(move |_| {
+        shared1.handle_event_async(Event::SigTerm);
         future::ok(())
     });
 
