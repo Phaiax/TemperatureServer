@@ -58,11 +58,11 @@ impl Parameters {
 impl Default for Parameters {
     fn default() -> Parameters {
         Parameters {
-            // plug_trigger_on: Cell::new(Celsius(-0.2)),
-            // plug_trigger_off: Cell::new(Celsius(0.2)),
-            plug_trigger_on: Cell::new(Celsius(22.5)),
-            plug_trigger_off: Cell::new(Celsius(23.0)),
-            use_sensor: Sensor::Sec,
+            plug_trigger_on: Cell::new(Celsius(-0.2)),
+            plug_trigger_off: Cell::new(Celsius(0.2)),
+            //plug_trigger_on: Cell::new(Celsius(22.5)),
+            //plug_trigger_off: Cell::new(Celsius(23.0)),
+            use_sensor: Sensor::Fourth,
         }
     }
 }
