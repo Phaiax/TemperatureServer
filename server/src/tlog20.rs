@@ -150,7 +150,7 @@ impl Decoder for Tlog20Codec {
 
         // negative temperatures
         if temperature > 0x8000 {
-            temperature = 0xffff - temperature;
+            temperature = - 0xffff + temperature;
         }
 
         // original value has unit `0.01 deg C`
