@@ -38,6 +38,7 @@ pub struct Data {
     pub time: NaiveDateTime,
     pub mean: [u16; 6],
     pub celsius: [i16; 6],
+    pub plug_state: bool,
 }
 
 fn naivedatetime_as_intint<S>(data: &NaiveDateTime, ser: S) -> Result<S::Ok, S::Error>
@@ -355,13 +356,14 @@ impl FileDb {
         }
     }
 
-    pub fn insert_or_update_async(&self, data0: TemperatureStats) -> CpuFuture<Data, Error> {
+    pub fn insert_or_update_async(&self, data0: TemperatureStats, plug_state: bool) -> CpuFuture<Data, Error> {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
         let mut data = Data {
             time: Local::now().naive_local(),
             mean: [0; 6],
             celsius: ::temp::raw2celsius100(&data0.mean),
+            plug_state,
         };
         data.mean.iter_mut().zip(data0.mean.iter()).for_each(|(i,m)| *i = *m as u16);
 

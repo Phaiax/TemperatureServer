@@ -1,4 +1,6 @@
 
+use tokio_inotify::AsyncINotify;
+
 use failure::Error;
 
 use shared::Shared;
@@ -9,8 +11,16 @@ use hyper::header::ContentLength;
 use futures::future::Future;
 use futures;
 
+use handlebars::Handlebars;
 
 pub fn make_web_server(shared: &Shared) -> Server<HelloWorldSpawner, ::hyper::Body> {
+
+//    let database_url: PathBuf = env::var("TEMPLATE_FOLDER")
+//        .context("Environment variable TEMPLATE_FOLDER must be set.")?
+//        .into();
+//
+//    let path_notify = AsyncINotify::new(&shared.handle());
+
     let addr = "0.0.0.0:12345".parse().unwrap();
     Http::new()
         .bind(
@@ -20,6 +30,7 @@ pub fn make_web_server(shared: &Shared) -> Server<HelloWorldSpawner, ::hyper::Bo
             },
         )
         .unwrap()
+
 }
 
 pub struct HelloWorldSpawner {

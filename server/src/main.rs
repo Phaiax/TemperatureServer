@@ -24,6 +24,8 @@ extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_serial;
 extern crate tokio_signal;
+extern crate tokio_inotify;
+extern crate handlebars;
 
 mod nanoext;
 mod web;
@@ -31,6 +33,7 @@ mod temp;
 mod tlog20;
 mod shared;
 mod filedb;
+mod parameters;
 
 use std::sync::RwLock;
 use std::rc::Rc;
@@ -61,6 +64,8 @@ use temp::TemperatureStats;
 use shared::{setup_shared, Shared, SharedInner};
 
 use filedb::FileDb;
+
+use parameters::PlugAction;
 
 pub const NANOEXT_SERIAL_DEVICE: &'static str =
     "/dev/serial/by-id/usb-1a86_USB2.0-Serial-if00-port0";
@@ -140,6 +145,10 @@ fn run() -> Result<(), Error> {
     // save regulary
     setup_db_save_interval(Duration::from_secs(10), shared.clone());
 
+    // Init plug off
+    shared.send_command_async(NanoExtCommand::PowerOff, shared.clone());
+    shared.plug_state.set(false);
+
     info!("START EVENT LOOP!");
 
     // Start Webserver and block until shutdown is triggered
@@ -207,10 +216,30 @@ fn handle_events(
     let error_handler = error_stream.for_each(move |error| {
         match error {
             Event::NewTemperatures => {
-                let future = shared1
+                let filedb_update = shared1
                     .db()
-                    .insert_or_update_async(shared1.temperatures.get());
-                shared1.spawn(future.then(|_| future::ok(())));
+                    .insert_or_update_async(shared1.temperatures.get(), shared1.plug_state.get());
+                shared1.spawn(filedb_update.then(|_| future::ok(())));
+
+                let action = shared1.parameters.plug_action(&shared1.temperatures.get());
+                match action {
+                    PlugAction::TurnOn => {
+                        if ! shared1.plug_state.get() {
+                            info!("Turn Plug on");
+                            shared1.send_command_async(NanoExtCommand::PowerOn, shared1.clone());
+                            shared1.plug_state.set(true);
+                        }
+
+                    }
+                    PlugAction::TurnOff => {
+                        if shared1.plug_state.get() {
+                            info!("Turn Plug off");
+                            shared1.send_command_async(NanoExtCommand::PowerOff, shared1.clone());
+                            shared1.plug_state.set(false);
+                        }
+                    }
+                    PlugAction::KeepAsIs => {}
+                }
             }
             // A Error in the NanoExt. Try to respawn max 5 times.
             Event::NanoExtDecoderError => if respawn_count == 0 {
@@ -234,7 +263,7 @@ fn handle_events(
             Event::CtrlC => {
                 info!("Ctrl-c received.");
                 shutdown_trigger();
-            },
+            }
             Event::SigTerm => {
                 info!("SIGTERM received.");
                 shutdown_trigger();
@@ -249,11 +278,16 @@ fn handle_events(
 
 pub fn setup_db_save_interval(interval: Duration, shared: Shared) {
     let shared1 = shared.clone();
-    let prog = Interval::new(interval, &shared.handle()).unwrap().for_each(move |_| {
-        let prog = shared1.db().save_all();
-        shared1.spawn(prog.map_err(|e| { error!("Error while saving db: {}", e); () } ));
-        future::ok(())
-    });
+    let prog = Interval::new(interval, &shared.handle())
+        .unwrap()
+        .for_each(move |_| {
+            let prog = shared1.db().save_all();
+            shared1.spawn(prog.map_err(|e| {
+                error!("Error while saving db: {}", e);
+                ()
+            }));
+            future::ok(())
+        });
     shared.spawn(prog.then(|_| future::ok(())));
 }
 
@@ -275,12 +309,13 @@ fn setup_ctrlc_forwarding(shared: Shared) {
 fn setup_sigterm_forwarding(shared: Shared) {
     let shared1 = shared.clone();
 
-    let prog = Signal::new(::libc::SIGTERM, &shared.handle()).map(|x| {
-        Box::new(x.map(|_| ()))
-    }).flatten_stream().for_each(move |_| {
-        shared1.handle_event_async(Event::SigTerm);
-        future::ok(())
-    });
+    let prog = Signal::new(::libc::SIGTERM, &shared.handle())
+        .map(|x| Box::new(x.map(|_| ())))
+        .flatten_stream()
+        .for_each(move |_| {
+            shared1.handle_event_async(Event::SigTerm);
+            future::ok(())
+        });
 
     shared.spawn(prog.map_err(|_| ()));
 }
@@ -313,6 +348,8 @@ fn setup_stdin_handling(shared: Shared) {
 
     shared.spawn(prog);
 }
+
+
 
 // from crate `tokio-stdin`
 // But buffer lines instead of sending each byte by itself

@@ -58,10 +58,10 @@ pub fn init_serial_port(shared: Shared) -> Result<NanoextCommandSink, Error>  {
             // Print every x item
             every_i += 1;
             if every_i == 10 {
+                shared_clone.handle_event_async(Event::NewTemperatures);
                 info!("{:?}", ts.1);
                 every_i = 0;
             }
-            shared_clone.handle_event_async(Event::NewTemperatures);
 
             // save into shared data
             shared_clone.temperatures.set(ts.1);
