@@ -31,8 +31,18 @@ pub fn make_web_server(shared: &Shared) -> Result<Server<HelloWorldSpawner, ::hy
         );
     }
 
+    let addr = "0.0.0.0:12345".parse().unwrap();
+    let server = Http::new()
+            .bind(
+                &addr,
+                HelloWorldSpawner {
+                    shared: shared.clone(),
+                },
+            )
+            .unwrap();
 
-    let path_notify = AsyncINotify::init(&shared.handle())?;
+
+    let path_notify = AsyncINotify::init(&server.handle())?;
     pub const IN_CLOSE_WRITE: u32 = 8;
     path_notify
         .add_watch(&assets_folder, IN_CLOSE_WRITE)
@@ -42,20 +52,9 @@ pub fn make_web_server(shared: &Shared) -> Result<Server<HelloWorldSpawner, ::hy
     let webassets_updater = path_notify.for_each(|_event| {
         future::ok(())
     });
-    shared.spawn(webassets_updater.print_and_forget_error());
+    server.handle().spawn(webassets_updater.print_and_forget_error());
 
-
-    let addr = "0.0.0.0:12345".parse().unwrap();
-    Ok(
-        Http::new()
-            .bind(
-                &addr,
-                HelloWorldSpawner {
-                    shared: shared.clone(),
-                },
-            )
-            .unwrap(),
-    )
+    Ok(server)
 }
 
 pub struct HelloWorldSpawner {
