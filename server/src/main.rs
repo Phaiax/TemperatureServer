@@ -9,6 +9,7 @@ extern crate env_logger;
 extern crate failure;
 extern crate futures;
 extern crate futures_cpupool;
+extern crate handlebars;
 extern crate hyper;
 #[macro_use]
 extern crate lazy_static;
@@ -21,11 +22,10 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate tokio_core;
+extern crate tokio_inotify;
 extern crate tokio_io;
 extern crate tokio_serial;
 extern crate tokio_signal;
-extern crate tokio_inotify;
-extern crate handlebars;
 
 mod nanoext;
 mod web;
@@ -34,6 +34,7 @@ mod tlog20;
 mod shared;
 mod filedb;
 mod parameters;
+mod utils;
 
 use std::sync::RwLock;
 use std::rc::Rc;
@@ -54,7 +55,7 @@ use futures::Sink;
 use tokio_core::reactor::{Handle, Interval};
 use tokio_signal::unix::Signal;
 
-use failure::Error;
+use failure::{Error, Fail};
 
 use chrono::prelude::*;
 
@@ -66,6 +67,8 @@ use shared::{setup_shared, Shared, SharedInner};
 use filedb::FileDb;
 
 use parameters::PlugAction;
+
+use utils::FutureExt;
 
 pub const NANOEXT_SERIAL_DEVICE: &'static str =
     "/dev/serial/by-id/usb-1a86_USB2.0-Serial-if00-port0";
@@ -95,8 +98,8 @@ fn main() {
 
     match run() {
         Ok(()) => {}
-        Err(e) => {
-            error!("{:?}", e);
+        Err(err) => {
+            utils::print_error_and_causes(err);
         }
     }
 }
@@ -115,18 +118,21 @@ fn run() -> Result<(), Error> {
     let shared = setup_shared(event_sink, db);
 
     // Hyper will create the tokio core / reactor ...
-    let server = web::make_web_server(&shared);
+    let server = web::make_web_server(&shared)?;
 
     // ... which we will reuse for the serial ports and everything else
     shared.put_handle(server.handle());
 
     // Now connect to the Arduino (called the NanoExt)
-    let command_sink = nanoext::init_serial_port(shared.clone())?;
-    shared.put_command_sink(command_sink, shared.clone());
+    match nanoext::init_serial_port(shared.clone()) {
+        Ok(command_sink) => shared.put_command_sink(command_sink, shared.clone()),
+        Err(err) => /* return Err(err) */ error!("{}", err)
+    }
+
 
     // Now connect to the TLOG20, but do not fail if not present
     tlog20::init_serial_port(shared.clone())
-        .map_err(|e| error!("{}", e))
+        .map_err(|err| error!("{}", err))
         .ok();
 
     // Handle SIG_INT
@@ -219,25 +225,20 @@ fn handle_events(
                 let filedb_update = shared1
                     .db()
                     .insert_or_update_async(shared1.temperatures.get(), shared1.plug_state.get());
-                shared1.spawn(filedb_update.then(|_| future::ok(())));
+                shared1.spawn(filedb_update.print_and_forget_error());
 
                 let action = shared1.parameters.plug_action(&shared1.temperatures.get());
                 match action {
-                    PlugAction::TurnOn => {
-                        if ! shared1.plug_state.get() {
-                            info!("Turn Plug on");
-                            shared1.send_command_async(NanoExtCommand::PowerOn, shared1.clone());
-                            shared1.plug_state.set(true);
-                        }
-
-                    }
-                    PlugAction::TurnOff => {
-                        if shared1.plug_state.get() {
-                            info!("Turn Plug off");
-                            shared1.send_command_async(NanoExtCommand::PowerOff, shared1.clone());
-                            shared1.plug_state.set(false);
-                        }
-                    }
+                    PlugAction::TurnOn => if !shared1.plug_state.get() {
+                        info!("Turn Plug on");
+                        shared1.send_command_async(NanoExtCommand::PowerOn, shared1.clone());
+                        shared1.plug_state.set(true);
+                    },
+                    PlugAction::TurnOff => if shared1.plug_state.get() {
+                        info!("Turn Plug off");
+                        shared1.send_command_async(NanoExtCommand::PowerOff, shared1.clone());
+                        shared1.plug_state.set(false);
+                    },
                     PlugAction::KeepAsIs => {}
                 }
             }
@@ -282,13 +283,12 @@ pub fn setup_db_save_interval(interval: Duration, shared: Shared) {
         .unwrap()
         .for_each(move |_| {
             let prog = shared1.db().save_all();
-            shared1.spawn(prog.map_err(|e| {
-                error!("Error while saving db: {}", e);
-                ()
-            }));
+            shared1.spawn(
+                prog.print_and_forget_error_with_context("Could not save database"),
+            );
             future::ok(())
         });
-    shared.spawn(prog.then(|_| future::ok(())));
+    shared.spawn(prog.print_and_forget_error());
 }
 
 /// Handle Ctrl+c aka SIG_INT
@@ -303,7 +303,7 @@ fn setup_ctrlc_forwarding(shared: Shared) {
         future::ok(())
     });
 
-    shared.spawn(prog.map_err(|_| ()));
+    shared.spawn(prog.print_and_forget_error_with_context("Ctrl+C forwarding error."));
 }
 
 fn setup_sigterm_forwarding(shared: Shared) {
@@ -317,7 +317,7 @@ fn setup_sigterm_forwarding(shared: Shared) {
             future::ok(())
         });
 
-    shared.spawn(prog.map_err(|_| ()));
+    shared.spawn(prog.print_and_forget_error_with_context("SIGTERM forwarding error."));
 }
 
 
@@ -341,8 +341,8 @@ fn setup_stdin_handling(shared: Shared) {
             }
             future::ok(())
         })
-        .map_err(|e| {
-            debug!("StdIn canceld: {:?}", e);
+        .map_err(|_| { // Error has type ()
+            debug!("StdIn canceled.");
             ()
         });
 

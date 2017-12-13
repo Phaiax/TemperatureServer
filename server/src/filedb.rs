@@ -33,49 +33,86 @@ use regex::Regex;
 /// When written for each minute a day, then the daily file has size 72KB
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Data {
-    #[serde(serialize_with = "naivedatetime_as_intint",
-            deserialize_with = "intint_as_naivedatetime")]
+    #[serde(serialize_with = "dataserde::naivedatetime_as_intint",
+            deserialize_with = "dataserde::intint_as_naivedatetime")]
     pub time: NaiveDateTime,
     pub mean: [u16; 6],
     pub celsius: [i16; 6],
     pub plug_state: bool,
 }
 
-fn naivedatetime_as_intint<S>(data: &NaiveDateTime, ser: S) -> Result<S::Ok, S::Error>
-where
-    S: ::serde::Serializer,
-{
-    use serde::ser::SerializeTuple;
-    let mut tup = ser.serialize_tuple(2)?;
-    tup.serialize_element(&data.timestamp())?;
-    tup.serialize_element(&data.timestamp_subsec_nanos())?;
-    tup.end()
-}
+mod dataserde {
+    use super::*;
 
-struct IntIntVisitor;
-impl<'de> ::serde::de::Visitor<'de> for IntIntVisitor {
-    type Value = NaiveDateTime;
-    fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(formatter, "two integers")
-    }
-
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    pub fn naivedatetime_as_intint<S>(data: &NaiveDateTime, ser: S) -> Result<S::Ok, S::Error>
     where
-        A: ::serde::de::SeqAccess<'de>,
+        S: ::serde::Serializer,
     {
-        let secs = seq.next_element::<i64>()?.unwrap();
-        let nanos = seq.next_element::<i64>()?.unwrap();
-        Ok(NaiveDateTime::from_timestamp(secs, nanos as u32))
+        use serde::ser::SerializeTuple;
+        let mut tup = ser.serialize_tuple(2)?;
+        tup.serialize_element(&data.timestamp())?;
+        tup.serialize_element(&data.timestamp_subsec_nanos())?;
+        tup.end()
     }
-}
 
-fn intint_as_naivedatetime<'de, D>(deser: D) -> Result<NaiveDateTime, D::Error>
-where
-    D: ::serde::Deserializer<'de>,
-{
-    deser.deserialize_tuple(2, IntIntVisitor)
-}
+    use serde::de::Error as SerdeError;
 
+    struct MySerdeError(String);
+
+    impl SerdeError for MySerdeError {
+        fn custom<T>(msg: T) -> Self
+        where
+            T: Display,
+        {
+            MySerdeError(format!("{}", msg))
+        }
+    }
+
+    impl Display for MySerdeError {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
+            Display::fmt(&self.0, f)
+        }
+    }
+
+    impl ::std::fmt::Debug for MySerdeError {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter) -> Result<(), ::std::fmt::Error> {
+            ::std::fmt::Debug::fmt(&self.0, f)
+        }
+    }
+
+    impl ::std::error::Error for MySerdeError {
+        fn description(&self) -> &str {
+            &self.0
+        }
+    }
+
+    struct IntIntVisitor;
+    impl<'de> ::serde::de::Visitor<'de> for IntIntVisitor {
+        type Value = NaiveDateTime;
+        fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            write!(formatter, "two integers")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: ::serde::de::SeqAccess<'de>,
+        {
+            let secs = seq.next_element::<i64>()?
+                .ok_or_else(|| SerdeError::invalid_length(0, &"two integers"))?;
+            let nanos = seq.next_element::<i64>()?
+                .ok_or_else(|| SerdeError::invalid_length(1, &"one more integer"))?;
+            Ok(NaiveDateTime::from_timestamp(secs, nanos as u32))
+        }
+    }
+
+    pub fn intint_as_naivedatetime<'de, D>(deser: D) -> Result<NaiveDateTime, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        deser.deserialize_tuple(2, IntIntVisitor)
+    }
+
+}
 
 // Chunks are days
 struct Chunk {
@@ -107,26 +144,29 @@ impl Chunk {
         }
     }
 
-    fn force_to_memory(&mut self) -> Result<(), Error> {
-        if self.data.is_none() && self.disk_is_up_to_date {
-            let file = File::open(&self.path)?;
-            let size = file.metadata().map(|m| m.len()).unwrap_or(100000);
-            let mut buf_reader = BufReader::new(file);
-            let mut contents = Vec::with_capacity(size as usize);
-            buf_reader.read_to_end(&mut contents)?;
-
-            let mut de = Deserializer::new(&contents[..]);
-            let desered: Vec<Data> = Deserialize::deserialize(&mut de).unwrap();
-            self.data = Some(Arc::new(desered));
-        } else if self.data.is_some() {
-            // ok
+    fn force_to_memory(&mut self) -> Result<&mut Arc<Vec<Data>>, Error> {
+        if let Some(ref mut data) = self.data {
+            Ok(data)
         } else {
-            bail!(
-                "No data, but disk not up to date!? ({})",
-                self.path.to_string_lossy()
-            );
+            if self.disk_is_up_to_date {
+                let file = File::open(&self.path)?;
+                let size = file.metadata().map(|m| m.len()).unwrap_or(100000);
+                let mut buf_reader = BufReader::new(file);
+                let mut contents = Vec::with_capacity(size as usize);
+                buf_reader.read_to_end(&mut contents)?;
+
+                let mut de = Deserializer::new(&contents[..]);
+                let desered: Vec<Data> = Deserialize::deserialize(&mut de)?;
+
+                self.data = Some(Arc::new(desered));
+                Ok(self.data.as_mut().unwrap())
+            } else {
+                bail!(
+                    "No data, but disk not up to date!? ({})",
+                    self.path.to_string_lossy()
+                );
+            }
         }
-        Ok(())
     }
 
     fn sync_to_disk(&mut self) -> Result<(), Error> {
@@ -135,27 +175,27 @@ impl Chunk {
                 bail!("No data to write to {}", self.path.to_string_lossy());
             }
 
-            self.sync_serialized()?;
-
-            let mut file = File::create(&self.path)?;
-            file.write_all(&self.serialized.as_ref().unwrap()[..])?;
+            {
+                let mut file = File::create(&self.path)?;
+                let serialized = self.sync_serialized()?;
+                file.write_all(&serialized[..])?;
+            }
 
             self.disk_is_up_to_date = true;
         }
         Ok(())
     }
 
-    fn sync_serialized(&mut self) -> Result<(), Error> {
-        if self.data.is_some() && self.serialized.is_none() {
+    fn sync_serialized(&mut self) -> Result<&Arc<Vec<u8>>, Error> {
+        if let Some(ref serialized) = self.serialized {
+            Ok(serialized)
+        } else {
             let mut buf = Vec::with_capacity(0);
-            self.data
-                .as_ref()
-                .unwrap()
-                .serialize(&mut Serializer::new(&mut buf))
-                .unwrap();
+            let serialized = self.force_to_memory()?
+                .serialize(&mut Serializer::new(&mut buf))?;
             self.serialized = Some(Arc::new(buf));
-        };
-        Ok(())
+            Ok(&self.serialized.as_ref().unwrap())
+        }
     }
 
     pub fn update<F, R>(&mut self, f: F) -> Result<R, Error>
@@ -173,42 +213,24 @@ impl Chunk {
     where
         F: FnOnce(&mut Vec<Data>) -> R,
     {
-        self.force_to_memory()?;
+        let r = f(Arc::make_mut(self.force_to_memory()?));
         self.serialized = None;
         self.disk_is_up_to_date = false;
-        if let Some(mut data) = Arc::get_mut(self.data.as_mut().unwrap()) {
-            // there was only one owner
-            return Ok(f(&mut data));
-        }
-        use std::ops::Deref;
-        let mut cloned_vec: Vec<Data> = self.data.as_ref().unwrap().deref().clone();
-        let r = f(&mut cloned_vec);
-        self.data = Some(Arc::new(cloned_vec));
         Ok(r)
     }
 
     pub fn get_shared_vec(&mut self) -> Result<Arc<Vec<Data>>, Error> {
-        self.force_to_memory()?;
-
-        Ok(self.data.as_ref().unwrap().clone())
+        Ok(self.force_to_memory()?.clone())
     }
 
     pub fn get_serialized(&mut self) -> Result<Arc<Vec<u8>>, Error> {
-        self.force_to_memory()?;
-        self.sync_serialized()?;
-
-        Ok(self.serialized.as_ref().unwrap().clone())
+        Ok(self.sync_serialized()?.clone())
     }
 
     pub fn get_by_key(&mut self, key: NaiveDateTime) -> Result<Option<Data>, Error> {
-        self.force_to_memory()?;
-
-        let data = &*self.data.as_ref().unwrap();
-
-        let pos = data.binary_search_by_key(&key, |data| data.time);
-
-        match pos {
-            Ok(index) => return Ok(data.get(index).cloned()),
+        let data = self.force_to_memory()?;
+        match data.binary_search_by_key(&key, |data| data.time) {
+            Ok(index) => Ok(data.get(index).cloned()),
             Err(_would_be_insert) => Ok(None),
         }
     }
@@ -346,17 +368,31 @@ impl FileDb {
     }
 
 
-    fn result_to_future<T, E: Display>(res: Result<T, E>) -> future::FutureResult<T, E> {
+    fn result_to_future<T, E: Into<Error>>(res: Result<T, E>) -> future::FutureResult<T, Error> {
         match res {
-            Ok(d) => future::ok::<T, E>(d),
+            Ok(d) => future::ok::<T, Error>(d),
+            Err(e) => future::err::<T, Error>(e.into().context("Filedb error").into()),
+        }
+    }
+
+    fn result_to_future_with_context<T, E: Into<Error>>(
+        res: Result<T, E>,
+        context: &'static str,
+    ) -> future::FutureResult<T, Error> {
+        match res {
+            Ok(d) => future::ok::<T, Error>(d),
             Err(e) => {
-                error!("DB Error {}", e);
-                future::err::<T, E>(e)
+                let e: Error = e.into().context(context).into();
+                future::err::<T, Error>(e.context("Filedb error").into())
             }
         }
     }
 
-    pub fn insert_or_update_async(&self, data0: TemperatureStats, plug_state: bool) -> CpuFuture<Data, Error> {
+    pub fn insert_or_update_async(
+        &self,
+        data0: TemperatureStats,
+        plug_state: bool,
+    ) -> CpuFuture<Data, Error> {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
         let mut data = Data {
@@ -365,7 +401,10 @@ impl FileDb {
             celsius: ::temp::raw2celsius100(&data0.mean),
             plug_state,
         };
-        data.mean.iter_mut().zip(data0.mean.iter()).for_each(|(i,m)| *i = *m as u16);
+        data.mean
+            .iter_mut()
+            .zip(data0.mean.iter())
+            .for_each(|(i, m)| *i = *m as u16);
 
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let date = data.time.date();
@@ -375,7 +414,7 @@ impl FileDb {
                 .unwrap()
                 .insert_or_update(data.clone())
                 .map(|_| data);
-            Self::result_to_future(r)
+            Self::result_to_future_with_context(r, "Could not insert or update")
         }));
 
         self.pool.spawn(f)
@@ -389,7 +428,7 @@ impl FileDb {
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunk = Self::get_or_create_by_date(&chunks, date, path_base);
             let r = chunk.lock().unwrap().get_serialized();
-            Self::result_to_future(r)
+            Self::result_to_future_with_context(r, "Could not serialize")
         }));
 
         self.pool.spawn(f)
@@ -403,7 +442,7 @@ impl FileDb {
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunk = Self::get_or_create_by_date(&chunks, date, path_base);
             let r = chunk.lock().unwrap().get_shared_vec();
-            Self::result_to_future(r)
+            Self::result_to_future_with_context(r, "Could not get by date")
         }));
 
         self.pool.spawn(f)
@@ -416,7 +455,7 @@ impl FileDb {
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunk = Self::get_or_create_by_date(&chunks, time.date(), path_base);
             let r = chunk.lock().unwrap().get_by_key(time);
-            Self::result_to_future(r)
+            Self::result_to_future_with_context(r, "Could not get bu datetime")
         }));
 
         self.pool.spawn(f)
@@ -478,14 +517,14 @@ mod test {
         // as u16 for comparision
         let mean_u = [500, 600, 500, 400, 500, 700];
 
-        let pooloperation = db.insert_or_update_async(temp);
+        let pooloperation = db.insert_or_update_async(temp, true);
         let data = pooloperation.wait().unwrap();
         assert!(data.mean == mean_u);
 
         // Add entry while holding the vec (so the vec must be cloned)
         let vec = db.get_by_date(date).wait().unwrap();
         assert!(vec[0].mean == mean_u);
-        db.insert_or_update_async(temp).wait().unwrap();
+        db.insert_or_update_async(temp, false).wait().unwrap();
         assert!(vec.len() == 1);
         let vec = db.get_by_date(date).wait().unwrap();
         assert!(vec.len() == 2);

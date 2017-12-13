@@ -1,36 +1,61 @@
 
+use std::path::PathBuf;
+
+use utils::FutureExt;
+
+use env;
+
 use tokio_inotify::AsyncINotify;
 
-use failure::Error;
+use failure::{Error, ResultExt};
 
 use shared::Shared;
 
 use hyper::server::{Http, NewService, Request, Response, Server, Service};
 use hyper::header::ContentLength;
 
-use futures::future::Future;
+use futures::future::{self, Future};
 use futures;
+use futures::Stream;
 
 use handlebars::Handlebars;
 
-pub fn make_web_server(shared: &Shared) -> Server<HelloWorldSpawner, ::hyper::Body> {
+pub fn make_web_server(shared: &Shared) -> Result<Server<HelloWorldSpawner, ::hyper::Body>, Error> {
+    let assets_folder: PathBuf = ::std::fs::canonicalize(env::var("WEBASSETS_FOLDER")
+        .context("Environment variable WEBASSETS_FOLDER must be set.")?)?;
 
-//    let database_url: PathBuf = env::var("TEMPLATE_FOLDER")
-//        .context("Environment variable TEMPLATE_FOLDER must be set.")?
-//        .into();
-//
-//    let path_notify = AsyncINotify::new(&shared.handle());
+    if !assets_folder.is_dir() {
+        bail!(
+            "WEBASSETS_FOLDER not found ({})",
+            assets_folder.to_string_lossy()
+        );
+    }
+
+
+    let path_notify = AsyncINotify::init(&shared.handle())?;
+    pub const IN_CLOSE_WRITE: u32 = 8;
+    path_notify
+        .add_watch(&assets_folder, IN_CLOSE_WRITE)
+        .context("Web server can not watch the webassets folder for changes.")?;
+
+
+    let webassets_updater = path_notify.for_each(|_event| {
+        future::ok(())
+    });
+    shared.spawn(webassets_updater.print_and_forget_error());
+
 
     let addr = "0.0.0.0:12345".parse().unwrap();
-    Http::new()
-        .bind(
-            &addr,
-            HelloWorldSpawner {
-                shared: shared.clone(),
-            },
-        )
-        .unwrap()
-
+    Ok(
+        Http::new()
+            .bind(
+                &addr,
+                HelloWorldSpawner {
+                    shared: shared.clone(),
+                },
+            )
+            .unwrap(),
+    )
 }
 
 pub struct HelloWorldSpawner {
