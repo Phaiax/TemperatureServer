@@ -5,8 +5,7 @@ SERVICENAME=temperatures
 EXECUTABLE=$(pwd)/target/debug/server
 SERVICEFILE=/etc/systemd/system/${SERVICENAME}.service
 USER=$USER
-#LOGDIRECTORY=${HOME}/log
-#[Service] Environment="LOGDIRECTORY=${LOGDIRECTORY}"
+LOG_FOLDER=${HOME}/log
 
 echo "** MAKE ${LOGDIRECTORY}"
 
@@ -24,6 +23,9 @@ Type=simple
 User=${USER}
 ExecStart=${EXECUTABLE}
 Restart=on-abort
+Environment="LOG_FOLDER=${LOG_FOLDER}"
+Environment="RUST_BACKTRACE=1"
+Environment="RUST_LOG=info"
 
 [Install]
 WantedBy=multi-user.target

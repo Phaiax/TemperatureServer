@@ -143,7 +143,7 @@ fn run() -> Result<(), Error> {
     handle_events(shared.clone(), event_stream, shutdown_trigger);
 
     // save regulary
-    setup_db_save_interval(Duration::from_secs(10), shared.clone());
+    setup_db_save_interval(Duration::from_secs(60*10), shared.clone());
 
     // Init plug off
     shared.send_command_async(NanoExtCommand::PowerOff, shared.clone());
