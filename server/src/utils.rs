@@ -1,0 +1,96 @@
+
+use futures::Future;
+use failure::Error;
+
+
+mod print_and_forget_error {
+
+    use futures::Future;
+    use futures::{Poll, Async};
+    use failure::Error;
+    use super::print_error_and_causes;
+
+
+    pub struct PrintAndForgetError<F> where F: Future {
+        future: F,
+        context: Option<&'static str>,
+    }
+
+    pub fn new<F>(future: F, context: Option<&'static str>) -> PrintAndForgetError<F>
+        where F: Future,
+    {
+        PrintAndForgetError {
+            future: future,
+            context,
+        }
+    }
+
+    impl<F, I, E> Future for PrintAndForgetError<F>
+        where F: Future<Item=I, Error=E>,
+        E: Into<Error>
+    {
+        type Item = ();
+        type Error = ();
+
+        fn poll(&mut self) -> Poll<(), ()> {
+            match self.future.poll() {
+                Ok(Async::NotReady) => return Ok(Async::NotReady),
+                Ok(Async::Ready(_e)) => Ok(Async::Ready(())),
+                Err(e) => {
+                    match self.context {
+                        Some(context) => print_error_and_causes(e.into().context(context)),
+                        None => print_error_and_causes(e),
+                    }
+                    Err(())
+                },
+            }
+        }
+    }
+
+}
+
+use self::print_and_forget_error::PrintAndForgetError;
+
+pub trait FutureExt<I> {
+    fn print_and_forget_error(self) -> PrintAndForgetError<Self>
+    where
+        Self: Sized + Future;
+
+    fn print_and_forget_error_with_context(self, context : &'static str) -> PrintAndForgetError<Self>
+    where
+        Self: Sized + Future;
+}
+
+
+impl<F, I, E> FutureExt<F> for F
+where
+    F: Future<Item = I, Error = E>,
+    E: Into<Error>
+{
+    fn print_and_forget_error(self) -> PrintAndForgetError<Self>
+    where
+        Self: Sized,
+    {
+        print_and_forget_error::new(self, None)
+    }
+
+    fn print_and_forget_error_with_context(self, context : &'static str) -> PrintAndForgetError<Self>
+    where
+        Self: Sized,
+    {
+        print_and_forget_error::new(self, Some(context))
+    }
+}
+
+
+pub fn print_error_and_causes<E>(err: E) where E: Into<Error> {
+    let err = err.into();
+    for (i, cause) in err.causes().enumerate() {
+        if i == 0 {
+            error!("{}", cause);
+        } else {
+            error!(" > caused by: {}", cause);
+        }
+    }
+    error!("{}", err.backtrace());
+}

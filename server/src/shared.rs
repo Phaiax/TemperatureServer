@@ -12,7 +12,8 @@ use Event;
 use parameters::Parameters;
 use filedb::FileDb;
 
-
+// Todo: make newtype struct and create accessor methods for pub fields. Then remove shared argument
+// in the member functions of SharedInner below. (do impl Shared instead)
 pub type Shared = Rc<SharedInner>;
 
 pub struct SharedInner {
@@ -96,8 +97,8 @@ impl SharedInner {
 
     /// Asyncronously send a command to the nanoext.
     ///
-    /// This will temporary comsume the sink and use the `pending_nanoext_command`
-    /// to save the command while the sink is on its roundtrip.
+    /// This will temporary comsume the sink and use the field `pending_nanoext_command`
+    /// to save the next command while the sink is on its roundtrip for the current one.
     ///
     /// If another sink appeared when the original sink comes home (connection reset),
     /// then redo the command.

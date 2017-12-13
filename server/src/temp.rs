@@ -54,11 +54,12 @@ impl Debug for TemperatureStats {
         //write!(f, "{:3.1} ] (std:{:.1}) ", self.mean[5], self.std_dev[0])?;
         // write!(f, "Means: {:.1}°C ({:.1}, {:.1}) ",
         // mean_celsius[0], self.mean[0], self.std_dev[0])?;
-         write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[1], self.mean[1], self.std_dev[1])?;
-         write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[2], self.mean[2], self.std_dev[2])?;
-         write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[3], self.mean[3], self.std_dev[3])?;
-         write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[4], self.mean[4], self.std_dev[4])?;
-         write!(f, "{:.1}°C ({:.1}, {:.1}) ", mean_celsius[5], self.mean[5], self.std_dev[5])?;
+         write!(f, "Oben: {:.1} deg C ", mean_celsius[0])?;
+         write!(f, "| Oberhalb: {:.1} deg C ", mean_celsius[1])?;
+         write!(f, "| Mitte: {:.1} deg C ", mean_celsius[2])?;
+         write!(f, "| Unterhalb: {:.1} deg C ", mean_celsius[3])?;
+         write!(f, "| Unten: {:.1} deg C ", mean_celsius[4])?;
+         write!(f, "| Außen: {:.1} deg C ", mean_celsius[5])?;
         Ok(())
     }
 }
