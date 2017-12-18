@@ -41,7 +41,7 @@ pub struct Data {
     pub plug_state: bool,
 }
 
-mod dataserde {
+pub mod dataserde {
     use super::*;
 
     pub fn naivedatetime_as_intint<S>(data: &NaiveDateTime, ser: S) -> Result<S::Ok, S::Error>
@@ -227,6 +227,14 @@ impl Chunk {
         Ok(self.sync_serialized()?.clone())
     }
 
+    pub fn get_special<F>(&mut self, f: F) -> Result<Arc<Vec<u8>>, Error>
+    where
+        F: FnOnce(&[Data]) -> Vec<u8>,
+    {
+        let vec = Arc::new(f(&self.force_to_memory()?[..]));
+        Ok(vec)
+    }
+
     pub fn get_by_key(&mut self, key: NaiveDateTime) -> Result<Option<Data>, Error> {
         let data = self.force_to_memory()?;
         match data.binary_search_by_key(&key, |data| data.time) {
@@ -243,6 +251,10 @@ impl Chunk {
                 Err(would_be_insert) => vec.insert(would_be_insert, data),
             }
         })
+    }
+
+    pub fn len(&mut self) -> Result<usize, Error> {
+        self.force_to_memory().map(|c| c.len())
     }
 }
 
@@ -434,6 +446,22 @@ impl FileDb {
         self.pool.spawn(f)
     }
 
+    pub fn get_special_by_date<F>(&self, date: NaiveDate, f: F) -> CpuFuture<Arc<Vec<u8>>, Error>
+    where
+        F: FnOnce(&[Data]) -> Vec<u8> + Send + 'static,
+    {
+        let chunks = self.chunks.clone();
+        let path_base = self.path_base.clone();
+
+        let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
+            let chunk = Self::get_or_create_by_date(&chunks, date, path_base);
+            let r = chunk.lock().unwrap().get_special(f);
+            Self::result_to_future_with_context(r, "Could not serialize special")
+        }));
+
+        self.pool.spawn(f)
+    }
+
 
     pub fn get_by_date(&self, date: NaiveDate) -> CpuFuture<Arc<Vec<Data>>, Error> {
         let chunks = self.chunks.clone();
@@ -455,7 +483,35 @@ impl FileDb {
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunk = Self::get_or_create_by_date(&chunks, time.date(), path_base);
             let r = chunk.lock().unwrap().get_by_key(time);
-            Self::result_to_future_with_context(r, "Could not get bu datetime")
+            Self::result_to_future_with_context(r, "Could not get by datetime")
+        }));
+
+        self.pool.spawn(f)
+    }
+
+    pub fn get_dates(&self) -> CpuFuture<Vec<NaiveDate>, Error> {
+        let chunks = self.chunks.clone();
+
+        let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
+            let chunks = chunks.lock().unwrap();
+            let mut dates = Vec::with_capacity(chunks.len());
+            for (date, chunk) in chunks.iter() {
+                let len = match chunk.lock().unwrap().len() {
+                    Ok(len) => len,
+                    Err(e) => {
+                        return future::err(
+                            Error::from(e)
+                                .context("Could not get data len of chunk.")
+                                .into(),
+                        )
+                    }
+                };
+                if len > 0 {
+                    dates.push(*date);
+                }
+            }
+            dates.sort();
+            future::ok(dates)
         }));
 
         self.pool.spawn(f)
