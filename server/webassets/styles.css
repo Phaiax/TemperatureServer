@@ -1,0 +1,32 @@
+
+.clear {
+    clear: both;
+    height: 1px;
+}
+
+ul.dates {
+
+}
+
+ul.dates li {
+    float: left;
+    padding: 7px 10px;
+    margin: 10px 10px;
+    border: 2px solid #999999;
+    background-color: #EDEDED;
+    list-style-type: none;
+    cursor: pointer;
+}
+
+ul {
+    display: block;
+    width: 100%;
+    margin: 0px;
+}
+ul.current li {
+    float: left;
+    padding: 6px 10px;
+    list-style-type: none;
+    margin: 10px 10px;
+    border: 2px solid #999999;
+}

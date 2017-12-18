@@ -1,0 +1,139 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+
+  <title>Temperature Sensor Log</title>
+  <meta name="description" content="Temperature Sensor Log">
+  <meta name="author" content="Daniel Seemer">
+
+  <link rel="stylesheet" href="assets/styles.css?v=1.0">
+</head>
+
+<body>
+    <ul class="current">
+        <li>Zeit: <span id="curr_time"></span> </li>
+        <li>Heizung: <span id="curr_plug_state"></span> </li>
+        <li>Außen: <span id="curr_outside"></span>°C </li>
+    </ul>
+    <div class="clear"></div>
+    <ul class="current">
+        <li>Oben: <span id="curr_high"></span>°C </li>
+        <li>Oberhalb: <span id="curr_highmid"></span>°C </li>
+        <li>Mitte: <span id="curr_mid"></span>°C </li>
+        <li>Unterhalb: <span id="curr_midlow"></span>°C </li>
+        <li>Unten: <span id="curr_low"></span>°C </li>
+    </ul>
+    <div class="clear"></div>
+    <ul id="dates" class="dates"> </ul>
+    <div class="clear"></div>
+    <div id="chart_div"></div>
+
+  <script src="assets/jquery.min.js" type="text/javascript" charset="utf-8"></script>
+  <script src="assets/msgpack.min.js" type="text/javascript" charset="utf-8"></script>
+  <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+        google.charts.load('current', {'packages':['corechart'], 'language': 'de'});
+
+        var tables = {};
+
+        var display_history = function( date, data ) {
+
+            google.charts.setOnLoadCallback(function() {
+
+                if (data instanceof google.visualization.DataTable) {
+                    table = data;
+                } else {
+                    var table = new google.visualization.DataTable();
+                    table.addColumn('datetime', 'Zeit');
+                    table.addColumn('number', 'Oben');
+                    table.addColumn('number', 'Oberhalb');
+                    table.addColumn('number', 'Mitte');
+                    table.addColumn('number', 'Unterhalb');
+                    table.addColumn('number', 'Unten');
+                    table.addColumn('number', 'Außen');
+                    table.addColumn('number', 'Stecker');
+                    table.addRows(data);
+
+                    tables[date] = table;
+                }
+
+                var options = {'title':'Temperaturen',
+                               'width':800,
+                               'height':300};
+
+                var chart = new google.visualization.LineChart(document.getElementById('chart_div'));
+                chart.draw(table, options);
+            });
+        };
+
+
+        var load_history = function(date) {
+            if (date in tables) {
+                display_history(date, tables[date]);
+            } else {
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', 'history/' + date, true);
+                xhr.responseType = 'arraybuffer';
+                xhr.onreadystatechange = function(event) {
+                  if ( this.readyState == 4 && this.status == 200 ) {
+                    var data = msgpack.decode(new Uint8Array(this.response));
+                    var arrayLength = data.length;
+                    for (var i = 0; i < arrayLength; i++) {
+                        data[i][0] = new Date(data[i][0]);
+                    }
+                    display_history(date, data);
+                  }
+                };
+                xhr.send();
+            }
+        }
+
+        $.get( "dates", function( data ) {
+            var ul = $( "#dates" );
+            for (var i = 0; i < data.length; i++) {
+                var a = $("<a></a>");
+                a.text(data[i]);
+                a.data('date', data[i]);
+                a.click(function() {
+                    load_history($(this).data('date'));
+                });
+                var li = $("<li></li>");
+                li.append(a);
+                ul.append(li);
+            };
+        });
+
+        var get_current_state = function() {
+            $.get( "current", function( data ) {
+                var date = new Date(data.time);
+                var strdate = date.toLocaleTimeString("de-DE",
+                    { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                $('#curr_time').text(strdate);
+
+                if (data.plug_state == 1) {
+                    $('#curr_plug_state').text("EIN");
+                } else {
+                    $('#curr_plug_state').text("AUS");
+                }
+                $('#curr_high').text(data.high);
+                $('#curr_highmid').text(data.highmid);
+                $('#curr_mid').text(data.mid);
+                $('#curr_midlow').text(data.midlow);
+                $('#curr_low').text(data.low);
+                $('#curr_outside').text(data.outside);
+            });
+        }
+
+        get_current_state();
+        window.setTimeout(get_current_state, 10000);
+
+
+    });
+
+  </script>
+</body>
+</html>

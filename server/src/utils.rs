@@ -82,6 +82,31 @@ where
     }
 }
 
+pub trait ResultExt<T, E> {
+    fn print_error_and_causes(self) where E: Into<Error>;
+
+//    fn compat(self) -> Result<T, Compat<E>>;
+//    fn context<D>(self, context: D) -> Result<T, Context<D>>
+//    where
+//        D: Display + Send + Sync + 'static;
+//    fn with_context<F, D>(self, f: F) -> Result<T, Context<D>>
+//    where
+//        F: FnOnce(&E) -> D,
+//        D: Display + Send + Sync + 'static;
+}
+
+impl<T, E> ResultExt<T, E> for Result<T, E> {
+    fn print_error_and_causes(self) where E: Into<Error> {
+        match self {
+            Ok(_t) => (),
+            Err(e) => {
+                print_error_and_causes(e);
+            }
+        }
+    }
+
+}
+
 
 pub fn print_error_and_causes<E>(err: E) where E: Into<Error> {
     let err = err.into();
@@ -94,3 +119,5 @@ pub fn print_error_and_causes<E>(err: E) where E: Into<Error> {
     }
     error!("{}", err.backtrace());
 }
+
+
