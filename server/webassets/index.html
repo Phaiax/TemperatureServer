@@ -96,7 +96,8 @@
             var ul = $( "#dates" );
             for (var i = 0; i < data.length; i++) {
                 var a = $("<a></a>");
-                a.text(data[i]);
+                var as_js_date = new Date(data[i]);
+                a.text(as_js_date.toLocaleDateString("de", {weekday: 'short', month: 'numeric', day: 'numeric'}));
                 a.data('date', data[i]);
                 a.click(function() {
                     load_history($(this).data('date'));
@@ -129,7 +130,7 @@
         }
 
         get_current_state();
-        window.setTimeout(get_current_state, 10000);
+        window.setInterval(get_current_state, 10000);
 
 
     });

@@ -1,0 +1,17 @@
+[package]
+name = "file_db"
+version = "0.1.0"
+authors = ["Phaiax <phaiax-git@invisibletower.de>"]
+
+[dependencies]
+futures = "0.1"
+futures-cpupool = "0.1"
+failure = "*"
+log = "0.3"
+env_logger = "0.4.3"
+chrono = { version = "0.4", features = ["serde"] }
+dotenv = "0.10.0"
+serde = "1.0.24"
+serde_derive = "1.0.24"
+rmp-serde = "0.13.7"
+libc = "0.2"
