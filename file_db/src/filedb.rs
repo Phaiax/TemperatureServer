@@ -29,12 +29,12 @@ pub trait ToFilenamePart {
     fn to_filename_part(&self) -> String;
 }
 
-struct ArcedCacheType<InnerKey : TypeMapKey>(PhantomData<InnerKey>);
+/// Helper to wrap the `::Value` of a user defined TypeMap key with an `Arc<>`
+struct ArcedCacheType<InnerKey: TypeMapKey>(PhantomData<InnerKey>);
 
-impl<InnerKey : TypeMapKey> TypeMapKey for ArcedCacheType<InnerKey> {
+impl<InnerKey: TypeMapKey> TypeMapKey for ArcedCacheType<InnerKey> {
     type Value = Arc<InnerKey::Value>;
 }
-
 
 ///
 /// Data that will be saved into the file_db must implement this trait.
@@ -67,9 +67,10 @@ pub trait ChunkableData
     }
 }
 
-// Chunks are days
+/// Chunks are groups of data. (Grouped by `ChunkabeData::chunk_key()`)
+/// Each chunk is saved as a seperate file.
 struct Chunk<CData: ChunkableData> {
-    /// The absolute path to this chunks file.
+    /// The absolute path to this chunk's file.
     path: PathBuf,
     /// True, if the file `self.path` is up to date with `self.data`.
     disk_is_up_to_date: bool,
@@ -77,14 +78,18 @@ struct Chunk<CData: ChunkableData> {
     /// than the correspondent file `self.path` on disk.
     data: Option<Arc<Vec<CData>>>,
 
-    /// If there are entries, then theses are always on par with data
+    /// User defined data that is derived from `self.data`.
+    /// Any data in `self.cache` is always on par with data.
+    /// (In other words: On data update, the cache is cleared.)
     cache: ShareMap,
 }
 
-
+/// The Hashmap from ChunkKeys to chunks.
+/// Each chunk is mutexed.
 type Chunks<CData: ChunkableData> = HashMap<CData::ChunkKey, Arc<Mutex<Chunk<CData>>>>;
 
-// Filedb stores chunked data into a folder addressable by time and date
+/// The database type.
+/// Filedb stores chunked data into a folder addressable by key and chunk key.
 pub struct FileDb<CData: ChunkableData> {
     chunks: Arc<Mutex<Chunks<CData>>>,
     path_base: PathBuf,
@@ -101,8 +106,7 @@ impl<CData: ChunkableData> Chunk<CData> {
             path: p,
             disk_is_up_to_date: false,
             data: Some(Arc::new(vec![])),
-            cache: TypeMap::custom()
-            // serialized: None,
+            cache: TypeMap::custom(),
         }
     }
 
@@ -112,8 +116,7 @@ impl<CData: ChunkableData> Chunk<CData> {
             path: p,
             disk_is_up_to_date: true,
             data: None,
-            cache: TypeMap::custom()
-            // serialized: None,
+            cache: TypeMap::custom(),
         }
     }
 
@@ -163,18 +166,6 @@ impl<CData: ChunkableData> Chunk<CData> {
         Ok(())
     }
 
-    // fn sync_serialized(&mut self) -> Result<&Arc<Vec<u8>>, Error> {
-    //     if let Some(ref serialized) = self.serialized {
-    //         Ok(serialized)
-    //     } else {
-    //         let mut buf = Vec::with_capacity(0);
-    //         let serialized = self.force_to_memory()?
-    //             .serialize(&mut MsgPackSerializer::new(&mut buf))?;
-    //         self.serialized = Some(Arc::new(buf));
-    //         Ok(&self.serialized.as_ref().unwrap())
-    //     }
-    // }
-
     pub fn update<F, R>(&mut self, f: F) -> Result<R, Error>
     where
         F: FnOnce(&mut Vec<CData>) -> R,
@@ -201,15 +192,13 @@ impl<CData: ChunkableData> Chunk<CData> {
         Ok(self.force_to_memory()?.clone())
     }
 
-    // pub fn get_serialized(&mut self) -> Result<Arc<Vec<u8>>, Error> {
-    //     Ok(self.sync_serialized()?.clone())
-    // }
 
-    pub fn get_special<K : TypeMapKey, F>(&mut self, f: F)
-    -> Result<Arc<K::Value>, Error>
+    pub fn custom_cached<K: TypeMapKey>(
+        &mut self,
+        f: Box<Fn(&[CData]) -> K::Value>,
+    ) -> Result<Arc<K::Value>, Error>
     where
-        K::Value : Send + Sync,
-        F: FnOnce(&[CData]) -> K::Value,
+        K::Value: Send + Sync,
     {
         if let Some(val) = self.cache.get::<ArcedCacheType<K>>() {
             return Ok(Arc::clone(val));
@@ -383,37 +372,22 @@ impl<CData: ChunkableData> FileDb<CData> {
         }));
 
         self.pool.spawn(f)
-        // forget() keeps the pool running but forgets the CpuFuture
     }
 
-    // pub fn get_serialized_by_date(&self, date: NaiveDate) -> CpuFuture<Arc<Vec<u8>>, Error> {
-    //     let chunks = self.chunks.clone();
-    //     let path_base = self.path_base.clone();
-
-    //     let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
-    //         let chunk = Self::get_or_create_by_chunk_key(&chunks, date, path_base);
-    //         let r = chunk.lock().unwrap().get_serialized();
-    //         Self::result_to_future_with_context(r, "Could not serialize")
-    //     }));
-
-    //     self.pool.spawn(f)
-    // }
-
-    pub fn get_special_by_date_async<K : TypeMapKey, F>(
+    pub fn custom_cached_by_date_async<K: TypeMapKey>(
         &self,
         chunk_key: CData::ChunkKey,
-        filter_function: F,
+        filter_function: Box<Fn(&[CData]) -> K::Value + Send + Sync + 'static>,
     ) -> CpuFuture<Arc<K::Value>, Error>
     where
-        K::Value : Send + Sync ,
-        F: FnOnce(&[CData]) -> K::Value + Send + 'static,
+        K::Value: Send + Sync,
     {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
 
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunk = Self::get_or_create_by_chunk_key(&chunks, chunk_key, path_base);
-            let r = chunk.lock().unwrap().get_special::<K, _>(filter_function);
+            let r = chunk.lock().unwrap().custom_cached::<K>(filter_function);
             Self::result_to_future_with_context(r, "Could not serialize special")
         }));
 

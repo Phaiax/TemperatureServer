@@ -17,11 +17,19 @@
 //! * Uses messagepack by default to save data to disk.
 //! * Run tests with `cargo test -- --test-threads=1`
 //!
+//! # Internal Data Structure
+//!
+//! ```txt
+//! Arc<Mutex<                                                      >>
+//!            HashMap<ChunkKey,                                   >
+//!                              Arc<Mutex<                      >>
+//!                                        |--------CHUNK-------|
+//!                                        Option<              >
+//!                                               Arc<Vec<    >>
+//!                                                       Data
 //!
 //!
-//!
-//!
-//!
+//! ```
 
 #![allow(dead_code, unused_variables)]
 
@@ -144,35 +152,16 @@ mod tests {
         );
     }
 
-    use typemap::{Key, TypeMap};
+    use typemap::Key;
     use std::sync::Arc;
-    use chrono::NaiveDateTime;
-    use chrono::prelude::*;
+    use chrono::{Duration, NaiveDateTime};
+    use timestamped::create_intervall_filtermap;
 
     struct CachedSerializationType;
     impl Key for CachedSerializationType {
         type Value = Vec<usize>;
     }
 
-    fn filter_one_per_minute(data: &[Timestamped<TestData>]) -> Vec<usize> {
-        let mut filtered: Vec<usize> = Vec::with_capacity(260);
-        if data.len() > 1 {
-            let mut data = data.iter();
-            let first = data.next().unwrap();
-            let mut accept_time = first.key().num_seconds_from_midnight();
-            accept_time += 60;
-            filtered.push(first.a);
-
-            for d in data {
-                let curr_time = d.key().num_seconds_from_midnight();
-                if curr_time >= accept_time {
-                    accept_time = curr_time + 60; // auf Minuten runden?
-                    filtered.push(d.a);
-                }
-            }
-        }
-        filtered
-    }
 
     #[test]
     fn test_caching() {
@@ -197,8 +186,12 @@ mod tests {
         let date = db.get_non_empty_chunk_keys_async().wait().unwrap()[0];
 
         // filter every minute
+        let filter_one_per_minute =
+            create_intervall_filtermap(Duration::minutes(1), |data : &TestData| data.a as usize, 0.25);
+
+
         let filtered_cache: Arc<Vec<usize>> =
-            db.get_special_by_date_async::<CachedSerializationType, _>(date, filter_one_per_minute)
+            db.custom_cached_by_date_async::<CachedSerializationType>(date, filter_one_per_minute)
                 .wait()
                 .unwrap();
 
@@ -219,14 +212,16 @@ mod tests {
             db.insert_or_update_async(testdata.clone()).wait().unwrap();
         }
 
+        let filter_one_per_minute =
+            create_intervall_filtermap(Duration::minutes(1), |data : &TestData| data.a as usize, 0.25);
+
         let filtered_cache2: Arc<Vec<usize>> =
-            db.get_special_by_date_async::<CachedSerializationType, _>(date, filter_one_per_minute)
+            db.custom_cached_by_date_async::<CachedSerializationType>(date, filter_one_per_minute)
                 .wait()
                 .unwrap();
 
         assert_eq!(filtered_cache.len(), 250);
         assert_eq!(filtered_cache2.len(), 500);
-
     }
 
 }

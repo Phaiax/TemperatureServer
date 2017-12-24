@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use failure::Error;
 
 use filedb::{ChunkableData, ToFilenamePart};
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{Duration, NaiveDate, NaiveDateTime};
 use chrono::prelude::*;
 
 /// A wrapper for some structured data, that adds a timestamp and chunks the data by day into
@@ -24,16 +24,13 @@ pub struct Timestamped<D: Clone + Send + Sync + 'static> {
 impl<D: Clone + Send + Sync + 'static> Timestamped<D> {
     pub fn now(data: D) -> Timestamped<D> {
         Timestamped {
-            time : Local::now().naive_local(),
+            time: Local::now().naive_local(),
             data,
         }
     }
 
-    pub fn at(time : NaiveDateTime, data: D) -> Timestamped<D> {
-        Timestamped {
-            time,
-            data,
-        }
+    pub fn at(time: NaiveDateTime, data: D) -> Timestamped<D> {
+        Timestamped { time, data }
     }
 }
 
@@ -75,6 +72,41 @@ impl ToFilenamePart for NaiveDateWrapper {
     }
 }
 
+pub fn create_intervall_filtermap<
+    D: Serialize + DeserializeOwned + Clone + Send + Sync + 'static,
+    FM,
+    R,
+>(
+    every: Duration,
+    map: FM,
+    capacity_multiplier: f32,
+) -> Box<Fn(&[Timestamped<D>]) -> Vec<R> + Send + Sync + 'static>
+where
+    FM: Fn(&D) -> R + Send + Sync + 'static,
+{
+    let closure = move |timestamped_slice: &[Timestamped<D>]| {
+        let estimated_filtered_elements =
+            (timestamped_slice.len() as f32 * capacity_multiplier) as usize + 3;
+        let mut filtered: Vec<R> = Vec::with_capacity(estimated_filtered_elements);
+
+        if timestamped_slice.len() >= 1 {
+            let mut as_iter = timestamped_slice.iter();
+            let first = as_iter.next().unwrap();
+            let mut accept_time = (*first).key() + every;
+            filtered.push(map(first));
+
+            for next in as_iter {
+                let curr_time = next.key();
+                if curr_time >= accept_time {
+                    accept_time = curr_time + every;
+                    filtered.push(map(next));
+                }
+            }
+        }
+        filtered
+    };
+    Box::new(closure)
+}
 
 impl<D: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> ChunkableData
     for Timestamped<D> {
