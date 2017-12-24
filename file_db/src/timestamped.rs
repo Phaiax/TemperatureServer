@@ -22,10 +22,17 @@ pub struct Timestamped<D: Clone + Send + Sync + 'static> {
 }
 
 impl<D: Clone + Send + Sync + 'static> Timestamped<D> {
-    pub fn now(d: D) -> Timestamped<D> {
+    pub fn now(data: D) -> Timestamped<D> {
         Timestamped {
             time : Local::now().naive_local(),
-            data : d,
+            data,
+        }
+    }
+
+    pub fn at(time : NaiveDateTime, data: D) -> Timestamped<D> {
+        Timestamped {
+            time,
+            data,
         }
     }
 }
@@ -36,6 +43,7 @@ impl<D: Clone + Send + Sync + 'static> Deref for Timestamped<D> {
         &self.data
     }
 }
+
 
 #[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
 pub struct NaiveDateWrapper(pub NaiveDate);

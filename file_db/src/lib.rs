@@ -15,7 +15,7 @@
 //! # More
 //!
 //! * Uses messagepack by default to save data to disk.
-//!
+//! * Run tests with `cargo test -- --test-threads=1`
 //!
 //!
 //!
@@ -25,40 +25,41 @@
 
 #![allow(dead_code, unused_variables)]
 
-extern crate futures;
-extern crate futures_cpupool;
-#[macro_use]
-extern crate failure;
-#[macro_use]
-extern crate log;
-extern crate env_logger;
 extern crate chrono;
 extern crate dotenv;
+extern crate env_logger;
+#[macro_use]
+extern crate failure;
+extern crate futures;
+extern crate futures_cpupool;
+extern crate libc;
+#[macro_use]
+extern crate log;
+extern crate rmp_serde as rmps;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate rmp_serde as rmps;
-extern crate libc;
+extern crate typemap;
 
 mod filedb;
 mod timestamped;
 mod lock;
 
 #[cfg(test)]
-mod test {
+mod tests {
 
     use futures_cpupool::CpuPool;
     use std::path::{Path, PathBuf};
     use std::fs::create_dir;
     use std::ops::Deref;
-    use filedb::{FileDb, ChunkableData};
+    use filedb::{ChunkableData, FileDb};
     use timestamped::Timestamped;
     use futures::Future;
 
     #[derive(Serialize, Deserialize, Clone)]
     struct TestData {
-        a : usize,
-        b : Vec<u16>,
+        a: usize,
+        b: Vec<u16>,
     }
 
     type MyDb = FileDb<Timestamped<TestData>>;
@@ -70,7 +71,6 @@ mod test {
 
     #[test]
     fn test_db() {
-
         let database_url: PathBuf = "/tmp/file_db_test".into();
         create_dir(&database_url).ok();
 
@@ -79,7 +79,10 @@ mod test {
         let db = MyDb::new(&database_url, CpuPool::new(2)).unwrap();
 
 
-        let testdata = Timestamped::now(TestData { a : 2, b : vec![1,3,5,235] });
+        let testdata = Timestamped::now(TestData {
+            a: 2,
+            b: vec![1, 3, 5, 235],
+        });
         let date = testdata.chunk_key();
 
         let pooloperation = db.insert_or_update_async(testdata.clone());
@@ -89,7 +92,9 @@ mod test {
         // Add entry while holding the vec (so the vec must be cloned)
         let vec = db.get_by_chunk_key_async(date).wait().unwrap();
         assert_eq!(vec[0].a, testdata.a);
-        db.insert_or_update_async(Timestamped::now(testdata.deref().clone())).wait().unwrap();
+        db.insert_or_update_async(Timestamped::now(testdata.deref().clone()))
+            .wait()
+            .unwrap();
         assert_eq!(vec.len(), 1);
         let vec = db.get_by_chunk_key_async(date).wait().unwrap();
         assert_eq!(vec.len(), 2);
@@ -104,8 +109,9 @@ mod test {
         assert!(lockfile.is_file());
 
         // data-file
-        let data_file =
-            database_url.join(Path::new(&format!("chunk-{}.db", date.0.format("%Y-%m-%d"))));
+        let data_file = database_url.join(Path::new(
+            &format!("chunk-{}.db", date.0.format("%Y-%m-%d")),
+        ));
 
         // write to disk on drop and delete pid.dblock
         assert!(!data_file.is_file());
@@ -130,18 +136,97 @@ mod test {
 
         // reopen and reread data should fail
         let db = MyDb::new(&database_url, CpuPool::new(2)).unwrap();
-        assert!(db.get_by_key_async(testdata.key()).wait().unwrap().is_none());
+        assert!(
+            db.get_by_key_async(testdata.key())
+                .wait()
+                .unwrap()
+                .is_none()
+        );
     }
 
+    use typemap::{Key, TypeMap};
+    use std::sync::Arc;
+    use chrono::NaiveDateTime;
+    use chrono::prelude::*;
 
-}
+    struct CachedSerializationType;
+    impl Key for CachedSerializationType {
+        type Value = Vec<usize>;
+    }
 
+    fn filter_one_per_minute(data: &[Timestamped<TestData>]) -> Vec<usize> {
+        let mut filtered: Vec<usize> = Vec::with_capacity(260);
+        if data.len() > 1 {
+            let mut data = data.iter();
+            let first = data.next().unwrap();
+            let mut accept_time = first.key().num_seconds_from_midnight();
+            accept_time += 60;
+            filtered.push(first.a);
 
+            for d in data {
+                let curr_time = d.key().num_seconds_from_midnight();
+                if curr_time >= accept_time {
+                    accept_time = curr_time + 60; // auf Minuten runden?
+                    filtered.push(d.a);
+                }
+            }
+        }
+        filtered
+    }
 
-#[cfg(test)]
-mod tests {
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_caching() {
+        let database_url: PathBuf = "/tmp/file_db_test".into();
+        create_dir(&database_url).ok();
+
+        clear_db(&database_url);
+
+        let db = MyDb::new(&database_url, CpuPool::new(2)).unwrap();
+
+        for i in 1..1000 {
+            let testdata = Timestamped::at(
+                NaiveDateTime::from_timestamp(3600 + i * 15, 0),
+                TestData {
+                    a: i as usize,
+                    b: vec![1, 3, 5, 235],
+                },
+            );
+            db.insert_or_update_async(testdata.clone()).wait().unwrap();
+        }
+
+        let date = db.get_non_empty_chunk_keys_async().wait().unwrap()[0];
+
+        // filter every minute
+        let filtered_cache: Arc<Vec<usize>> =
+            db.get_special_by_date_async::<CachedSerializationType, _>(date, filter_one_per_minute)
+                .wait()
+                .unwrap();
+
+        // So with 4 entries per minute, and 1000 entries, there should be around 250 left.
+        // For each entry, we pushed one usize into the Vec.
+
+        assert_eq!(filtered_cache.len(), 250);
+
+        // Test that internal cache is cleared
+        for i in 1000..2000 {
+            let testdata = Timestamped::at(
+                NaiveDateTime::from_timestamp(3600 + i * 15, 0),
+                TestData {
+                    a: i as usize,
+                    b: vec![1, 3, 5, 235],
+                },
+            );
+            db.insert_or_update_async(testdata.clone()).wait().unwrap();
+        }
+
+        let filtered_cache2: Arc<Vec<usize>> =
+            db.get_special_by_date_async::<CachedSerializationType, _>(date, filter_one_per_minute)
+                .wait()
+                .unwrap();
+
+        assert_eq!(filtered_cache.len(), 250);
+        assert_eq!(filtered_cache2.len(), 500);
+
     }
+
 }

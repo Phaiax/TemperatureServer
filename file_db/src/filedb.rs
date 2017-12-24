@@ -1,7 +1,5 @@
 use std::str::FromStr;
 use std::hash::Hash;
-
-
 use std::env;
 use std::fmt::Display;
 use std::sync::{Mutex, MutexGuard};
@@ -11,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::fs::{self, read_dir, File};
 use std::io::{BufReader, BufWriter};
 use std::io::prelude::*;
+use std::marker::PhantomData;
 
 use futures::{future, Future};
 use futures_cpupool::{CpuFuture, CpuPool};
@@ -23,10 +22,19 @@ use rmps::{Deserializer as MsgPackDeserializer, Serializer as MsgPackSerializer}
 use serde::Serialize;
 use serde::de::{Deserialize, DeserializeOwned};
 
+use typemap::{Key as TypeMapKey, ShareMap, TypeMap};
+
 
 pub trait ToFilenamePart {
     fn to_filename_part(&self) -> String;
 }
+
+struct ArcedCacheType<InnerKey : TypeMapKey>(PhantomData<InnerKey>);
+
+impl<InnerKey : TypeMapKey> TypeMapKey for ArcedCacheType<InnerKey> {
+    type Value = Arc<InnerKey::Value>;
+}
+
 
 ///
 /// Data that will be saved into the file_db must implement this trait.
@@ -59,7 +67,6 @@ pub trait ChunkableData
     }
 }
 
-
 // Chunks are days
 struct Chunk<CData: ChunkableData> {
     /// The absolute path to this chunks file.
@@ -70,8 +77,8 @@ struct Chunk<CData: ChunkableData> {
     /// than the correspondent file `self.path` on disk.
     data: Option<Arc<Vec<CData>>>,
 
-    // /// If Some, then this is on par with data
-    // serialized: Option<Arc<Vec<u8>>>,
+    /// If there are entries, then theses are always on par with data
+    cache: ShareMap,
 }
 
 
@@ -94,6 +101,7 @@ impl<CData: ChunkableData> Chunk<CData> {
             path: p,
             disk_is_up_to_date: false,
             data: Some(Arc::new(vec![])),
+            cache: TypeMap::custom()
             // serialized: None,
         }
     }
@@ -104,6 +112,7 @@ impl<CData: ChunkableData> Chunk<CData> {
             path: p,
             disk_is_up_to_date: true,
             data: None,
+            cache: TypeMap::custom()
             // serialized: None,
         }
     }
@@ -184,6 +193,7 @@ impl<CData: ChunkableData> Chunk<CData> {
         let r = f(Arc::make_mut(self.force_to_memory()?));
         // self.serialized = None;
         self.disk_is_up_to_date = false;
+        self.cache.clear();
         Ok(r)
     }
 
@@ -195,12 +205,20 @@ impl<CData: ChunkableData> Chunk<CData> {
     //     Ok(self.sync_serialized()?.clone())
     // }
 
-    pub fn get_special<F>(&mut self, f: F) -> Result<Arc<Vec<u8>>, Error>
+    pub fn get_special<K : TypeMapKey, F>(&mut self, f: F)
+    -> Result<Arc<K::Value>, Error>
     where
-        F: FnOnce(&[CData]) -> Vec<u8>,
+        K::Value : Send + Sync,
+        F: FnOnce(&[CData]) -> K::Value,
     {
-        let vec = Arc::new(f(&self.force_to_memory()?[..]));
-        Ok(vec)
+        if let Some(val) = self.cache.get::<ArcedCacheType<K>>() {
+            return Ok(Arc::clone(val));
+        }
+
+        let new_val = Arc::new(f(&self.force_to_memory()?[..]));
+        self.cache.insert::<ArcedCacheType<K>>(new_val);
+
+        Ok(Arc::clone(self.cache.get::<ArcedCacheType<K>>().unwrap()))
     }
 
     pub fn get_by_key(&mut self, key: CData::Key) -> Result<Option<CData>, Error> {
@@ -231,9 +249,11 @@ impl<CData: ChunkableData> Chunk<CData> {
 
 
 impl<CData: ChunkableData> FileDb<CData> {
-    pub fn new_from_env(env_var_name : &str, num_threads: usize) -> Result<FileDb<CData>, Error> {
+    pub fn new_from_env(env_var_name: &str, num_threads: usize) -> Result<FileDb<CData>, Error> {
         let database_url: PathBuf = env::var(env_var_name)
-            .with_context(|_e| format!("Environment variable {} must be set.", env_var_name))?
+            .with_context(|_e| {
+                format!("Environment variable {} must be set.", env_var_name)
+            })?
             .into();
 
         Self::new(database_url, CpuPool::new(num_threads))
@@ -379,20 +399,21 @@ impl<CData: ChunkableData> FileDb<CData> {
     //     self.pool.spawn(f)
     // }
 
-    pub fn get_special_by_date_async<F>(
+    pub fn get_special_by_date_async<K : TypeMapKey, F>(
         &self,
         chunk_key: CData::ChunkKey,
-        f: F,
-    ) -> CpuFuture<Arc<Vec<u8>>, Error>
+        filter_function: F,
+    ) -> CpuFuture<Arc<K::Value>, Error>
     where
-        F: FnOnce(&[CData]) -> Vec<u8> + Send + 'static,
+        K::Value : Send + Sync ,
+        F: FnOnce(&[CData]) -> K::Value + Send + 'static,
     {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
 
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunk = Self::get_or_create_by_chunk_key(&chunks, chunk_key, path_base);
-            let r = chunk.lock().unwrap().get_special(f);
+            let r = chunk.lock().unwrap().get_special::<K, _>(filter_function);
             Self::result_to_future_with_context(r, "Could not serialize special")
         }));
 
