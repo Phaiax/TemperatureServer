@@ -76,7 +76,7 @@ use utils::FutureExt;
 pub const NANOEXT_SERIAL_DEVICE: &'static str =
     "/dev/serial/by-id/usb-1a86_USB2.0-Serial-if00-port0";
 pub const TLOG20_SERIAL_DEVICE: &'static str =
-    "/dev/serial/by-id/usb-FTDI_US232R_FT0IKONX-if00-port0";
+    "/dev/serial/by-id/usb-FTDI_US232R_FT0ILAKP-if00-port0";
 pub const NANOEXT_RESPAWN_COUNT: u32 = 5;
 
 pub const STDIN_BUFFER_SIZE: usize = 1000;

@@ -6,7 +6,7 @@ EXECUTABLE=$(pwd)/target/debug/server
 SERVICEFILE=/etc/systemd/system/${SERVICENAME}.service
 USER=$USER
 LOG_FOLDER=${HOME}/log
-WEBASSETS_FOLDER=$(pwd)/webassets
+WEBASSETS_FOLDER=$(pwd)/server/webassets
 
 echo "** MAKE ${LOGDIRECTORY}"
 
