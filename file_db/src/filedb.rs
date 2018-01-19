@@ -95,6 +95,7 @@ pub struct FileDb<CData: ChunkableData> {
     path_base: PathBuf,
     pool: CpuPool,
     lock: ExclusiveFilesystembasedLock,
+    version_postfix: &'static str,
 }
 
 
@@ -238,43 +239,61 @@ impl<CData: ChunkableData> Chunk<CData> {
 
 
 impl<CData: ChunkableData> FileDb<CData> {
-    pub fn new_from_env(env_var_name: &str, num_threads: usize) -> Result<FileDb<CData>, Error> {
+    pub fn new_from_env(
+        env_var_name: &str,
+        num_threads: usize,
+        version_postfix: &'static str,
+    ) -> Result<FileDb<CData>, Error> {
         let database_url: PathBuf = env::var(env_var_name)
             .with_context(|_e| {
                 format!("Environment variable {} must be set.", env_var_name)
             })?
             .into();
 
-        Self::new(database_url, CpuPool::new(num_threads))
+        Self::new(database_url, num_threads, version_postfix)
     }
 
 
-    pub fn new<P: AsRef<Path>>(database_url: P, pool: CpuPool) -> Result<FileDb<CData>, Error> {
+    pub fn new<P: AsRef<Path>>(
+        database_url: P,
+        num_threads: usize,
+        version_postfix: &'static str,
+    ) -> Result<FileDb<CData>, Error> {
         let lock =
             ExclusiveFilesystembasedLock::try_set_lock(database_url.as_ref().join("pid.dblock"))?;
 
         let mut chunks = HashMap::new();
-        for (path, existing_date) in Self::get_existing_files(&database_url)? {
+        for (path, existing_date) in Self::get_existing_files(&database_url, version_postfix)? {
             chunks.insert(existing_date, Arc::new(Mutex::new(Chunk::load(path))));
         }
 
         Ok(FileDb {
-            pool,
+            pool: CpuPool::new(num_threads),
             chunks: Arc::new(Mutex::new(chunks)),
             path_base: database_url.as_ref().to_path_buf(),
             lock,
+            version_postfix,
         })
     }
 
-    fn get_filepath<P: AsRef<Path>>(chunk_key: CData::ChunkKey, path_base: P) -> PathBuf {
-        path_base.as_ref().join(Path::new(
-            &format!("chunk-{}.db", &chunk_key.to_filename_part()),
-        ))
+    fn get_filepath<P: AsRef<Path>>(
+        chunk_key: CData::ChunkKey,
+        path_base: P,
+        version_postfix: &'static str,
+    ) -> PathBuf {
+        path_base.as_ref().join(Path::new(&format!(
+            "chunk-{}.db.{}",
+            &chunk_key.to_filename_part(),
+            version_postfix
+        )))
     }
 
     fn get_existing_files<P: AsRef<Path>>(
         path_base: P,
+        version_postfix: &'static str,
     ) -> Result<Vec<(PathBuf, CData::ChunkKey)>, Error> {
+        let filename_end = format!(".db.{}", version_postfix);
+
         let mut files = vec![];
         for entry in read_dir(&path_base).context("Database path is not a directory")? {
             let entry = entry?;
@@ -286,16 +305,18 @@ impl<CData: ChunkableData> FileDb<CData> {
 
                 // Do not use regex for something this simple
 
-                if filename.starts_with("chunk-") && filename.ends_with(".db") {
-                    let end = filename.len() - 3;
-                    let chunk_key_str = &filename[6..end];
+                if filename.starts_with("chunk-") && filename.ends_with(&filename_end[..]) {
+                    if filename.len() > 6 + filename_end.len() {
+                        let end = filename.len() - filename_end.len();
+                        let chunk_key_str = &filename[6..end];
 
-                    if let Ok(chunk_key) = CData::ChunkKey::from_str(&chunk_key_str) {
-                        let control = Self::get_filepath(chunk_key, &path_base);
-                        if control != path {
-                            bail!("Extracted {}, but path was {:?}", chunk_key, path);
+                        if let Ok(chunk_key) = CData::ChunkKey::from_str(&chunk_key_str) {
+                            let control = Self::get_filepath(chunk_key, &path_base, version_postfix);
+                            if control != path {
+                                bail!("Extracted {}, but path was {:?}", chunk_key, path);
+                            }
+                            files.push((control, chunk_key));
                         }
-                        files.push((control, chunk_key));
                     }
                 }
             }
@@ -307,6 +328,7 @@ impl<CData: ChunkableData> FileDb<CData> {
         this: &Arc<Mutex<Chunks<CData>>>,
         chunk_key: CData::ChunkKey,
         path_base: P,
+        version_postfix: &'static str,
     ) -> Arc<Mutex<Chunk<CData>>> {
         // chunks is a Hasmap
         // chunk is a vector
@@ -314,9 +336,9 @@ impl<CData: ChunkableData> FileDb<CData> {
         if chunks.contains_key(&chunk_key) {
             chunks.get(&chunk_key).unwrap().clone()
         } else {
-            let new_chunk = Arc::new(Mutex::new(
-                Chunk::new(Self::get_filepath(chunk_key, &path_base)),
-            ));
+            let new_chunk = Arc::new(Mutex::new(Chunk::new(
+                Self::get_filepath(chunk_key, &path_base, version_postfix),
+            )));
             chunks.insert(chunk_key, Arc::clone(&new_chunk));
             new_chunk
         }
@@ -360,9 +382,15 @@ impl<CData: ChunkableData> FileDb<CData> {
     pub fn insert_or_update_async(&self, data: CData) -> CpuFuture<CData, Error> {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
+        let version_postfix = self.version_postfix;
 
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
-            let chunk = Self::get_or_create_by_chunk_key(&chunks, data.chunk_key(), path_base);
+            let chunk = Self::get_or_create_by_chunk_key(
+                &chunks,
+                data.chunk_key(),
+                path_base,
+                version_postfix,
+            );
             let r = chunk
                 .lock()
                 .unwrap()
@@ -374,7 +402,8 @@ impl<CData: ChunkableData> FileDb<CData> {
         self.pool.spawn(f)
     }
 
-    pub fn custom_cached_by_date_async<K: TypeMapKey>(
+
+    pub fn custom_cached_by_chunk_key_async<K: TypeMapKey>(
         &self,
         chunk_key: CData::ChunkKey,
         filter_function: Box<Fn(&[CData]) -> K::Value + Send + Sync + 'static>,
@@ -384,9 +413,10 @@ impl<CData: ChunkableData> FileDb<CData> {
     {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
+        let version_postfix = self.version_postfix;
 
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
-            let chunk = Self::get_or_create_by_chunk_key(&chunks, chunk_key, path_base);
+            let chunk = Self::get_or_create_by_chunk_key(&chunks, chunk_key, path_base, version_postfix);
             let r = chunk.lock().unwrap().custom_cached::<K>(filter_function);
             Self::result_to_future_with_context(r, "Could not serialize special")
         }));
@@ -401,9 +431,10 @@ impl<CData: ChunkableData> FileDb<CData> {
     ) -> CpuFuture<Arc<Vec<CData>>, Error> {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
+        let version_postfix = self.version_postfix;
 
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
-            let chunk = Self::get_or_create_by_chunk_key(&chunks, chunk_key, path_base);
+            let chunk = Self::get_or_create_by_chunk_key(&chunks, chunk_key, path_base, version_postfix);
             let r = chunk.lock().unwrap().get_shared_vec();
             Self::result_to_future_with_context(r, "Could not get by chunk_key")
         }));
@@ -414,9 +445,10 @@ impl<CData: ChunkableData> FileDb<CData> {
     pub fn get_by_key_async(&self, key: CData::Key) -> CpuFuture<Option<CData>, Error> {
         let chunks = self.chunks.clone();
         let path_base = self.path_base.clone();
+        let version_postfix = self.version_postfix;
 
         let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
-            let chunk = Self::get_or_create_by_chunk_key(&chunks, key.into(), path_base);
+            let chunk = Self::get_or_create_by_chunk_key(&chunks, key.into(), path_base, version_postfix);
             let r = chunk.lock().unwrap().get_by_key(key);
             Self::result_to_future_with_context(r, "Could not get by datetime")
         }));
@@ -432,19 +464,20 @@ impl<CData: ChunkableData> FileDb<CData> {
             let mut chunk_keys = Vec::with_capacity(chunks.len());
 
             for (chunk_key, chunk) in chunks.iter() {
-                let len = match chunk.lock().unwrap().len() {
-                    Ok(len) => len,
-                    Err(e) => {
-                        return future::err(
-                            Error::from(e)
-                                .context("Could not get data len of chunk.")
-                                .into(),
-                        )
-                    }
-                };
-                if len > 0 {
+                // Test: skip len() check because this would normally force all chunks to memory
+                // let len = match chunk.lock().unwrap().len() {
+                //     Ok(len) => len,
+                //     Err(e) => {
+                //         return future::err(
+                //             Error::from(e)
+                //                 .context("Could not get data len of chunk.")
+                //                 .into(),
+                //         )
+                //     }
+                // };
+                //if len > 0 {
                     chunk_keys.push(*chunk_key);
-                }
+                //}
             }
             chunk_keys.sort();
             future::ok(chunk_keys)
@@ -456,7 +489,11 @@ impl<CData: ChunkableData> FileDb<CData> {
     pub fn clear_all_data_ondisk_and_in_memory(self) -> Result<(), Error> {
         let mut chunks = self.chunks.lock().unwrap();
         for (chunk_key, chunk) in chunks.drain() {
-            fs::remove_file(Self::get_filepath(chunk_key, &self.path_base))?;
+            fs::remove_file(Self::get_filepath(
+                chunk_key,
+                &self.path_base,
+                self.version_postfix,
+            ))?;
         }
         Ok(())
     }

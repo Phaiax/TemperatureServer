@@ -7,6 +7,7 @@ extern crate dotenv;
 extern crate env_logger;
 #[macro_use]
 extern crate failure;
+extern crate file_db;
 extern crate futures;
 extern crate futures_cpupool;
 extern crate handlebars;
@@ -19,9 +20,9 @@ extern crate log;
 extern crate regex;
 extern crate rmp_serde as rmps;
 extern crate serde;
-extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
+extern crate serde_json;
 extern crate tokio_core;
 extern crate tokio_inotify;
 extern crate tokio_io;
@@ -33,7 +34,6 @@ mod web;
 mod temp;
 mod tlog20;
 mod shared;
-mod filedb;
 mod parameters;
 mod utils;
 
@@ -42,6 +42,7 @@ use std::rc::Rc;
 use std::cell::{Cell, RefCell};
 use std::env;
 use std::time::Duration;
+use std::path::PathBuf;
 
 use log::{LogLevelFilter, LogRecord};
 use env_logger::{LogBuilder, LogTarget};
@@ -55,8 +56,9 @@ use futures::Sink;
 
 use tokio_core::reactor::{Handle, Interval};
 use tokio_signal::unix::Signal;
+use tokio_inotify::AsyncINotify;
 
-use failure::{Error, Fail};
+use failure::{err_msg, Error, Fail, ResultExt};
 
 use chrono::prelude::*;
 
@@ -65,7 +67,7 @@ use temp::TemperatureStats;
 
 use shared::{setup_shared, Shared, SharedInner};
 
-use filedb::FileDb;
+use file_db::{FileDb, Timestamped};
 
 use parameters::PlugAction;
 
@@ -89,6 +91,38 @@ pub enum Event {
     NewTemperatures,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DataLogEntry {
+    pub mean: [u16; 6],
+    pub celsius: [i16; 6],
+    pub plug_state: bool,
+    pub reference_celsius: Option<i16>,
+}
+
+pub type TSDataLogEntry = Timestamped<DataLogEntry>;
+pub type MyFileDb = FileDb<TSDataLogEntry>;
+
+impl DataLogEntry {
+    fn new_from_current(shared: &Shared) -> TSDataLogEntry {
+        let temps = shared.temperatures.get();
+        let plug_state = shared.plug_state.get();
+        //let reference = shared1.
+        let mut new = DataLogEntry {
+            mean: [0; 6],
+            celsius: ::temp::raw2celsius100(&temps.mean),
+            plug_state,
+            reference_celsius: shared
+                .reference_temperature
+                .get()
+                .map(|temp_in_degc| (temp_in_degc * 100.) as i16),
+        };
+        new.mean
+            .iter_mut()
+            .zip(temps.mean.iter())
+            .for_each(|(n, m)| *n = *m as u16);
+        Timestamped::now(new)
+    }
+}
 
 fn main() {
     // Init logging
@@ -113,7 +147,7 @@ fn run() -> Result<(), Error> {
     let (event_sink, event_stream) = mpsc::channel::<Event>(1);
 
     // Open Database and create thread for asyncronity
-    let db = FileDb::establish_connection()?;
+    let db = MyFileDb::new_from_env("LOG_FOLDER", 2, "v2")?;
 
     // Setup shared data (Handle and CommandSink still missing)
     let shared = setup_shared(event_sink, db);
@@ -135,6 +169,9 @@ fn run() -> Result<(), Error> {
     tlog20::init_serial_port(shared.clone())
         .map_err(|err| error!("{}", err))
         .ok();
+
+    // Handle on-the-fly attachment of external hardware
+    setup_serial_watch_and_reinit(shared.clone())?;
 
     // Handle SIG_INT
     setup_ctrlc_forwarding(shared.clone());
@@ -225,7 +262,7 @@ fn handle_events(
             Event::NewTemperatures => {
                 let filedb_update = shared1
                     .db()
-                    .insert_or_update_async(shared1.temperatures.get(), shared1.plug_state.get());
+                    .insert_or_update_async(DataLogEntry::new_from_current(&shared1));
                 shared1.spawn(filedb_update.print_and_forget_error());
 
                 let action = shared1.parameters.plug_action(&shared1.temperatures.get());
@@ -284,9 +321,7 @@ pub fn setup_db_save_interval(interval: Duration, shared: Shared) {
         .unwrap()
         .for_each(move |_| {
             let prog = shared1.db().save_all();
-            shared1.spawn(
-                prog.print_and_forget_error_with_context("Could not save database"),
-            );
+            shared1.spawn(prog.print_and_forget_error_with_context("Could not save database"));
             future::ok(())
         });
     shared.spawn(prog.print_and_forget_error());
@@ -342,7 +377,8 @@ fn setup_stdin_handling(shared: Shared) {
             }
             future::ok(())
         })
-        .map_err(|_| { // Error has type ()
+        .map_err(|_| {
+            // Error has type ()
             debug!("StdIn canceled.");
             ()
         });
@@ -350,7 +386,30 @@ fn setup_stdin_handling(shared: Shared) {
     shared.spawn(prog);
 }
 
+fn setup_serial_watch_and_reinit(shared: Shared) -> Result<(), Error> {
+    let path_notify = AsyncINotify::init(&shared.handle())?;
 
+
+    let device_path = PathBuf::from(NANOEXT_SERIAL_DEVICE);
+    let dev_serial = device_path.parent().ok_or(err_msg(
+        "Can't make parent directory of serial device paths",
+    ))?;
+
+    const IN_CREATE: u32 = 256;
+    path_notify
+        .add_watch(dev_serial, IN_CREATE)
+        .context("Can not watch serial devices' parent directory.")?;
+
+    let new_serial_watch = path_notify.for_each(move |_event| {
+        println!("{:?}", &_event.name.to_string_lossy());
+        future::ok(())
+    });
+
+    shared.spawn(new_serial_watch.print_and_forget_error());
+
+
+    Ok(())
+}
 
 // from crate `tokio-stdin`
 // But buffer lines instead of sending each byte by itself

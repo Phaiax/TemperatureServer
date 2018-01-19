@@ -50,8 +50,12 @@ extern crate serde_derive;
 extern crate typemap;
 
 mod filedb;
-mod timestamped;
-mod lock;
+pub mod timestamped;
+pub mod lock;
+
+pub use filedb::{FileDb, ToFilenamePart, ChunkableData};
+pub use timestamped::{Timestamped, TimestampedMethods, create_intervall_filtermap};
+pub use typemap::Key;
 
 #[cfg(test)]
 mod tests {
@@ -73,7 +77,7 @@ mod tests {
     type MyDb = FileDb<Timestamped<TestData>>;
 
     fn clear_db(database_url: &PathBuf) {
-        let db = MyDb::new(&database_url, CpuPool::new(2)).unwrap();
+        let db = MyDb::new(&database_url, 2, "v1").unwrap();
         db.clear_all_data_ondisk_and_in_memory().unwrap();
     }
 
@@ -84,7 +88,7 @@ mod tests {
 
         clear_db(&database_url);
 
-        let db = MyDb::new(&database_url, CpuPool::new(2)).unwrap();
+        let db = MyDb::new(&database_url, 2, "v1").unwrap();
 
 
         let testdata = Timestamped::now(TestData {
@@ -118,7 +122,7 @@ mod tests {
 
         // data-file
         let data_file = database_url.join(Path::new(
-            &format!("chunk-{}.db", date.0.format("%Y-%m-%d")),
+            &format!("chunk-{}.db.v1", date.0.format("%Y-%m-%d")),
         ));
 
         // write to disk on drop and delete pid.dblock
@@ -129,7 +133,7 @@ mod tests {
         let date_created = data_file.metadata().unwrap().modified().unwrap();
 
         // reopen and reread data
-        let db = MyDb::new(&database_url, CpuPool::new(2)).unwrap();
+        let db = MyDb::new(&database_url, 2, "v1").unwrap();
         let and_back = db.get_by_key_async(testdata.key()).wait().unwrap().unwrap();
         assert!(and_back.b == testdata.b);
         drop(db);
@@ -143,7 +147,7 @@ mod tests {
         assert!(!lockfile.is_file());
 
         // reopen and reread data should fail
-        let db = MyDb::new(&database_url, CpuPool::new(2)).unwrap();
+        let db = MyDb::new(&database_url, 2, "v1").unwrap();
         assert!(
             db.get_by_key_async(testdata.key())
                 .wait()
@@ -170,7 +174,7 @@ mod tests {
 
         clear_db(&database_url);
 
-        let db = MyDb::new(&database_url, CpuPool::new(2)).unwrap();
+        let db = MyDb::new(&database_url, 2, "v1").unwrap();
 
         for i in 1..1000 {
             let testdata = Timestamped::at(
@@ -191,7 +195,7 @@ mod tests {
 
 
         let filtered_cache: Arc<Vec<usize>> =
-            db.custom_cached_by_date_async::<CachedSerializationType>(date, filter_one_per_minute)
+            db.custom_cached_by_chunk_key_async::<CachedSerializationType>(date, filter_one_per_minute)
                 .wait()
                 .unwrap();
 
@@ -216,12 +220,15 @@ mod tests {
             create_intervall_filtermap(Duration::minutes(1), |data : &TestData| data.a as usize, 0.25);
 
         let filtered_cache2: Arc<Vec<usize>> =
-            db.custom_cached_by_date_async::<CachedSerializationType>(date, filter_one_per_minute)
+            db.custom_cached_by_chunk_key_async::<CachedSerializationType>(date, filter_one_per_minute)
                 .wait()
                 .unwrap();
 
         assert_eq!(filtered_cache.len(), 250);
         assert_eq!(filtered_cache2.len(), 500);
+
+        drop(db);
+        clear_db(&database_url);
     }
 
 }

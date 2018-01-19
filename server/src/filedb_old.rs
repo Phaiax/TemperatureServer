@@ -1,24 +1,21 @@
 #![allow(dead_code, unused_variables)]
 
 use std::env;
-use std::thread::{spawn, Thread};
 use std::fmt::Display;
-use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::{Mutex, MutexGuard};
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::fs::{self, read_dir, File};
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader};
 use std::io::prelude::*;
-use std::time::Duration;
 
 use futures::{future, Future};
 use futures_cpupool::{CpuFuture, CpuPool};
 
-use failure::{err_msg, Error, ResultExt};
+use failure::{Error, ResultExt};
 
-use temp::{TemperatureStats, Temperatures, raw2celsius};
+use temp::{TemperatureStats};
 
 use chrono::NaiveDateTime;
 use chrono::prelude::*;
@@ -31,7 +28,7 @@ use regex::Regex;
 /// This is 50 bytes when serialized as messagepack
 /// When written for each second a day, then the daily file has size 4MB
 /// When written for each minute a day, then the daily file has size 72KB
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Data {
     #[serde(serialize_with = "dataserde::naivedatetime_as_intint",
             deserialize_with = "dataserde::intint_as_naivedatetime")]
@@ -281,7 +278,7 @@ impl FileDb {
         let lockfilepath = database_url.join("pid.dblock");
 
         let mut lockfile = if lockfilepath.is_file() {
-            File::open(&lockfilepath)?
+            File::create(&lockfilepath)?
         } else {
             File::create(&lockfilepath)?
         };

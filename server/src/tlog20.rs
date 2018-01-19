@@ -43,23 +43,31 @@ pub fn init_serial_port(shared: Shared) -> Result<(), Error> {
 
     let serial = serial.framed(Tlog20Codec::new());
 
+    let shared_clone = shared.clone(); // for moving into closure
+    let shared_clone2 = shared.clone(); // for moving into closure
+
     // `for_each` processes the `Stream` of decoded Tlog20Codec::Items (`f64`)
     // and returns a future that represents this processing until the end of time.
     // We can only spawn `Future<Item = (), Error = ()>`.
     let serialfuture = serial
-        .for_each(|ts| {
+        .for_each(move |ts| {
             // New Item arrived
-            info!("Reference: {:?}", ts);
+            shared_clone.reference_temperature.set(Some(ts));
+            shared_clone.tlog20_connected.set(true);
             // This closure must return a future `Future<Item = (), Error = Tlog20Codec::Error>`.
             // `for_each` will run this future to completion before processing the next item.
             // But we can simply return an empty future.
             future::ok(())
         })
-        .or_else(|_e| {
+        .or_else(move |_e| {
             // Map the error type to `()`, but at least print the error.
             error!("TLOG20 decoder error: {:?}", _e);
+            shared_clone2.reference_temperature.set(None);
+            shared_clone2.nanoext_connected.set(false);
             future::err(())
         });
+
+
 
     shared.handle().spawn(serialfuture);
 

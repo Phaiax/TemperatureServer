@@ -21,6 +21,11 @@ pub struct Timestamped<D: Clone + Send + Sync + 'static> {
     data: D,
 }
 
+pub trait TimestampedMethods {
+    fn date(&self) -> NaiveDate;
+    fn time(&self) -> NaiveDateTime;
+}
+
 impl<D: Clone + Send + Sync + 'static> Timestamped<D> {
     pub fn now(data: D) -> Timestamped<D> {
         Timestamped {
@@ -34,6 +39,16 @@ impl<D: Clone + Send + Sync + 'static> Timestamped<D> {
     }
 }
 
+impl<D: Clone + Send + Sync + 'static> TimestampedMethods for Timestamped<D> {
+    fn date(&self) -> NaiveDate {
+        self.time.date()
+    }
+
+    fn time(&self) -> NaiveDateTime {
+        self.time
+    }
+}
+
 impl<D: Clone + Send + Sync + 'static> Deref for Timestamped<D> {
     type Target = D;
     fn deref(&self) -> &Self::Target {
@@ -42,12 +57,18 @@ impl<D: Clone + Send + Sync + 'static> Deref for Timestamped<D> {
 }
 
 
-#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
+#[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub struct NaiveDateWrapper(pub NaiveDate);
 
 impl From<NaiveDateTime> for NaiveDateWrapper {
     fn from(datetime: NaiveDateTime) -> NaiveDateWrapper {
         NaiveDateWrapper(datetime.date())
+    }
+}
+
+impl From<NaiveDate> for NaiveDateWrapper {
+    fn from(datetime: NaiveDate) -> NaiveDateWrapper {
+        NaiveDateWrapper(datetime)
     }
 }
 
@@ -72,6 +93,7 @@ impl ToFilenamePart for NaiveDateWrapper {
     }
 }
 
+
 pub fn create_intervall_filtermap<
     D: Serialize + DeserializeOwned + Clone + Send + Sync + 'static,
     FM,
@@ -82,7 +104,7 @@ pub fn create_intervall_filtermap<
     capacity_multiplier: f32,
 ) -> Box<Fn(&[Timestamped<D>]) -> Vec<R> + Send + Sync + 'static>
 where
-    FM: Fn(&D) -> R + Send + Sync + 'static,
+    FM: Fn(&Timestamped<D>) -> R + Send + Sync + 'static,
 {
     let closure = move |timestamped_slice: &[Timestamped<D>]| {
         let estimated_filtered_elements =

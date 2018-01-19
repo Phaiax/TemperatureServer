@@ -65,6 +65,7 @@ pub fn init_serial_port(shared: Shared) -> Result<NanoextCommandSink, Error>  {
 
             // save into shared data
             shared_clone.temperatures.set(ts.1);
+            shared_clone.nanoext_connected.set(true);
 
             // This closure must return a future `Future<Item = (), Error = Tlog20Codec::Error>`.
             // `for_each` will run this future to completion before processing the next item.
@@ -73,14 +74,15 @@ pub fn init_serial_port(shared: Shared) -> Result<NanoextCommandSink, Error>  {
         })
         .or_else(move |_e| {
             // Map the error type to `()`, but at least print the error.
-            error!("NANOEXT decoder error: {:?}", _e);
+            error!("NANOEXT decoder? error: {:?}", _e);
             // Will maybe spawn a new Nanoext
             shared_clone2.handle_event_async(Event::NanoExtDecoderError);
+            shared_clone2.nanoext_connected.set(false);
             future::err(())
         });
 
 
-    shared.handle().spawn(serialfuture.map_err(|_| ()));
+    shared.handle().spawn(serialfuture);
 
     Ok(serial_write)
 }
