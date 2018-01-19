@@ -16,6 +16,7 @@
         <li>Zeit: <span id="curr_time"></span> </li>
         <li>Heizung: <span id="curr_plug_state"></span> </li>
         <li>Außen: <span id="curr_outside"></span>°C </li>
+        <li>Referenz: <span id="curr_reference"></span>°C </li>
     </ul>
     <div class="clear"></div>
     <ul class="current">
@@ -56,6 +57,7 @@
                     table.addColumn('number', 'Unten');
                     table.addColumn('number', 'Außen');
                     table.addColumn('number', 'Stecker');
+                    table.addColumn('number', 'Reference');
                     table.addRows(data);
 
                     tables[date] = table;
@@ -96,7 +98,8 @@
             var ul = $( "#dates" );
             for (var i = 0; i < data.length; i++) {
                 var a = $("<a></a>");
-                a.text(data[i]);
+                var as_js_date = new Date(data[i]);
+                a.text(as_js_date.toLocaleDateString("de", {weekday: 'short', month: 'numeric', day: 'numeric'}));
                 a.data('date', data[i]);
                 a.click(function() {
                     load_history($(this).data('date'));
@@ -125,11 +128,12 @@
                 $('#curr_midlow').text(data.midlow);
                 $('#curr_low').text(data.low);
                 $('#curr_outside').text(data.outside);
+                $('#curr_reference').text(data.reference);
             });
         }
 
         get_current_state();
-        window.setTimeout(get_current_state, 10000);
+        window.setInterval(get_current_state, 10000);
 
 
     });

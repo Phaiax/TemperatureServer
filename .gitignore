@@ -3,3 +3,5 @@ nanoext/.piolibdeps
 *.pyc
 server/target
 server/log
+server/log2
+target

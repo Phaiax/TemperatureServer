@@ -10,7 +10,9 @@ use failure::Error;
 
 use Event;
 use parameters::Parameters;
-use filedb::FileDb;
+use MyFileDb;
+
+
 
 // Todo: make newtype struct and create accessor methods for pub fields. Then remove shared argument
 // in the member functions of SharedInner below. (do impl Shared instead)
@@ -19,23 +21,29 @@ pub type Shared = Rc<SharedInner>;
 pub struct SharedInner {
     pub temperatures: Cell<TemperatureStats>,
     pub plug_state : Cell<bool>,
+    pub reference_temperature : Cell<Option<f64>>,
     event_sink: mpsc::Sender<Event>,
     pending_nanoext_command : RefCell<Option<NanoExtCommand>>,
     nanoext_command_sink: RefCell<Option<NanoextCommandSink>>,
     reactor_handle: RefCell<Option<Handle>>,
-    db : FileDb,
+    pub nanoext_connected : Cell<bool>,
+    pub tlog20_connected : Cell<bool>,
+    db : MyFileDb,
     pub parameters : Parameters,
 }
 
-pub fn setup_shared(event_sink : mpsc::Sender<Event>, db : FileDb) -> Shared {
+pub fn setup_shared(event_sink : mpsc::Sender<Event>, db : MyFileDb) -> Shared {
 
     Rc::new(SharedInner {
         temperatures: Cell::new(TemperatureStats::default()),
         event_sink,
         plug_state : Cell::new(false),
+        reference_temperature : Cell::new(None),
         pending_nanoext_command : RefCell::new(None),
         nanoext_command_sink : RefCell::new(None),
         reactor_handle: RefCell::new(None),
+        nanoext_connected: Cell::new(false),
+        tlog20_connected: Cell::new(false),
         db,
         parameters : Parameters::default(),
     })
@@ -91,7 +99,7 @@ impl SharedInner {
         }
     }
 
-    pub fn db(&self) -> &FileDb {
+    pub fn db(&self) -> &MyFileDb {
         &self.db
     }
 

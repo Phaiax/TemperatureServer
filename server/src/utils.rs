@@ -121,3 +121,18 @@ pub fn print_error_and_causes<E>(err: E) where E: Into<Error> {
 }
 
 
+pub struct OnDrop(Option<Box<FnMut() -> ()>>);
+
+impl OnDrop {
+    pub fn execute_on_drop<F>(closure: F) -> OnDrop where F : FnMut() -> () + 'static {
+        OnDrop(Some(Box::new(closure)))
+    }
+}
+
+impl Drop for OnDrop {
+    fn drop(&mut self) {
+        let mut box_ = self.0.take().unwrap();
+        box_();
+    }
+
+}

@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::prelude::*;
 use std::ffi::OsStr;
+use std::sync::Arc;
 
 use utils::{print_error_and_causes, FutureExt, ResultExt as ResultExt2};
-use filedb::Data;
 
 use env;
 
@@ -17,6 +17,9 @@ use tokio_inotify::AsyncINotify;
 use failure::{Error, ResultExt};
 
 use shared::Shared;
+use DataLogEntry;
+use TSDataLogEntry;
+use file_db::{TimestampedMethods, create_intervall_filtermap};
 
 use hyper::StatusCode;
 use hyper::server::{Http, NewService, Request, Response, Server, Service};
@@ -33,7 +36,7 @@ use serde::{Deserialize, Serialize};
 
 use chrono::NaiveDate;
 use chrono::NaiveDateTime;
-use chrono::Timelike;
+use chrono::{Timelike, Duration};
 
 pub fn make_web_server(shared: &Shared) -> Result<Server<HelloWorldSpawner, ::hyper::Body>, Error> {
     let assets_folder: PathBuf = ::std::fs::canonicalize(env::var("WEBASSETS_FOLDER")
@@ -194,38 +197,36 @@ impl HelloWorld {
         }
     }
 
+
+
+
     fn serve_history<'a>(&self, date: Option<&'a str>) -> HandlerResult {
         match NaiveDate::parse_from_str(date.unwrap_or("nodate"), "%Y-%m-%d") {
             Ok(date) => {
                 let shared = self.shared.clone();
                 box_and_convert_error(future::lazy(move || {
-                    let future1 = shared.db().get_special_by_date(date, |data| {
+
+                    let every_3_minutes = create_intervall_filtermap(Duration::minutes(3),
+                        |data : &TSDataLogEntry| JsData::from(data), 0.25);
 
 
-                        let mut filtered: Vec<JsData> = Vec::with_capacity(500);
-                        if data.len() > 1 {
-                            let mut data = data.iter();
-                            let first = data.next().unwrap();
-                            let mut accept_time = first.time.time().num_seconds_from_midnight();
-                            accept_time += 60 * 3;
-                            filtered.push(first.into());
+                    use file_db::Key;
+                    struct CachedAndFilteredMarker;
+                    impl Key for CachedAndFilteredMarker {
+                        type Value = Vec<u8>;
+                    }
 
-                            for d in data {
-                                let curr_time = d.time.time().num_seconds_from_midnight();
-                                if curr_time >= accept_time {
-                                    accept_time = curr_time + 60 * 3; // auf Minuten runden?
-                                    filtered.push(d.into());
-                                }
-                            }
-                        }
+                    let future1 = shared.db().custom_cached_by_chunk_key_async::<CachedAndFilteredMarker>
+                        (date.into(), Box::new(move |data : &[::file_db::Timestamped<DataLogEntry>] | {
 
+                        let as_vec : Vec<_> = every_3_minutes(data);
                         let mut buf = Vec::with_capacity(0);
-                        filtered
+                        as_vec
                             .serialize(&mut Serializer::new(&mut buf))
                             .print_error_and_causes();
                         buf
-                    });
-                    future1.and_then(|serialized| {
+                    }));
+                    future1.and_then(|serialized: Arc<Vec<u8>>| {
                         let resp = Response::new()
                             .with_header(header::ContentLength(serialized.len() as u64))
                             .with_header(header::ContentType(::hyper::mime::APPLICATION_MSGPACK))
@@ -243,7 +244,7 @@ impl HelloWorld {
     fn serve_available_dates(&self) -> HandlerResult {
         let shared = Rc::clone(&self.shared);
         box_and_convert_error(future::lazy(move || {
-            let future1 = shared.db().get_dates();
+            let future1 = shared.db().get_non_empty_chunk_keys_async();
             future1.and_then(|datesvec| {
 
                 use serde_json;
@@ -262,15 +263,8 @@ impl HelloWorld {
     fn serve_current_temperatures(&self) -> HandlerResult {
        let shared = Rc::clone(&self.shared);
        box_and_convert_error(future::lazy(move || {
-            let temps = shared.temperatures.get();
-            let plug_state = shared.plug_state.get();
 
-            let data = Data {
-                time: ::chrono::Local::now().naive_local(),
-                mean: [0; 6],
-                celsius: ::temp::raw2celsius100(&temps.mean),
-                plug_state,
-            };
+            let data = DataLogEntry::new_from_current(&shared);
 
             let data : JsData = (&data).into(); // do better
 
@@ -366,12 +360,13 @@ pub struct JsData {
     pub low: f64,
     pub outside: f64,
     pub plug_state: u8,
+    pub reference: f64,
 }
 
-impl<'a> From<&'a Data> for JsData {
-    fn from(d: &Data) -> JsData {
+impl<'a> From<&'a TSDataLogEntry> for JsData {
+    fn from(d: &TSDataLogEntry) -> JsData {
         JsData {
-            time: d.time.format("%Y-%m-%dT%H:%M:%S+0000").to_string(),
+            time: d.time().format("%Y-%m-%dT%H:%M:%S+0000").to_string(),
             high : d.celsius[0] as f64 / 100.0,
             highmid : d.celsius[1] as f64 / 100.0,
             mid : d.celsius[2] as f64 / 100.0,
@@ -379,6 +374,7 @@ impl<'a> From<&'a Data> for JsData {
             low : d.celsius[4] as f64 / 100.0,
             outside : d.celsius[5] as f64 / 100.0,
             plug_state: if d.plug_state { 1 } else { 0 },
+            reference : d.reference_celsius.unwrap_or(0) as f64 / 100.0,
         }
     }
 }
