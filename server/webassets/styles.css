@@ -30,3 +30,7 @@ ul.current li {
     margin: 10px 10px;
     border: 2px solid #999999;
 }
+
+#curr_plug_command {
+    cursor: pointer;
+}

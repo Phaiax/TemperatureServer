@@ -2,17 +2,56 @@
 use nanoext::{NanoExtCommand, NanoextCommandSink};
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
+use std::time::Instant;
 use temp::TemperatureStats;
 use tokio_core::reactor::Handle;
 use futures::{future, Future, Sink};
 use futures::unsync::mpsc;
 use failure::Error;
-
 use Event;
 use parameters::Parameters;
 use MyFileDb;
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum PlugCommand {
+    /// Use the trigger values defined in `SharedInner::parameters`
+    Auto,
+    ForceOn { until: Instant },
+    ForceOff { until: Instant },
+}
 
+impl PlugCommand {
+    pub fn check_elapsed(_self : &Cell<PlugCommand>) {
+        let curr = _self.get();
+        let new = match curr {
+            PlugCommand::Auto => PlugCommand::Auto,
+            PlugCommand::ForceOn { until } => {
+                if until <= Instant::now() {
+                    PlugCommand::Auto
+                } else {
+                    PlugCommand::ForceOn { until }
+                }
+            },
+            PlugCommand::ForceOff { until } => {
+                if until <= Instant::now() {
+                    PlugCommand::Auto
+                } else {
+                    PlugCommand::ForceOff { until }
+                }
+            }
+        };
+        if new != curr {
+            _self.set(new);
+        }
+    }
+
+    pub fn is_auto(&self) -> bool {
+        match self {
+            &PlugCommand::Auto => true,
+            _ => false,
+        }
+    }
+}
 
 // Todo: make newtype struct and create accessor methods for pub fields. Then remove shared argument
 // in the member functions of SharedInner below. (do impl Shared instead)
@@ -21,6 +60,7 @@ pub type Shared = Rc<SharedInner>;
 pub struct SharedInner {
     pub temperatures: Cell<TemperatureStats>,
     pub plug_state : Cell<bool>,
+    pub plug_command : Cell<PlugCommand>,
     pub reference_temperature : Cell<Option<f64>>,
     event_sink: mpsc::Sender<Event>,
     pending_nanoext_command : RefCell<Option<NanoExtCommand>>,
@@ -38,6 +78,7 @@ pub fn setup_shared(event_sink : mpsc::Sender<Event>, db : MyFileDb) -> Shared {
         temperatures: Cell::new(TemperatureStats::default()),
         event_sink,
         plug_state : Cell::new(false),
+        plug_command : Cell::new(PlugCommand::Auto),
         reference_temperature : Cell::new(None),
         pending_nanoext_command : RefCell::new(None),
         nanoext_command_sink : RefCell::new(None),

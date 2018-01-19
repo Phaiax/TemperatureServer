@@ -7,19 +7,21 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::ffi::OsStr;
 use std::sync::Arc;
+use std::time::{Duration as SDuration, Instant};
 
 use utils::{print_error_and_causes, FutureExt, ResultExt as ResultExt2};
 
 use env;
 
 use tokio_inotify::AsyncINotify;
+use PlugCommand;
 
 use failure::{Error, ResultExt};
 
 use shared::Shared;
 use DataLogEntry;
 use TSDataLogEntry;
-use file_db::{TimestampedMethods, create_intervall_filtermap};
+use file_db::{create_intervall_filtermap, TimestampedMethods};
 
 use hyper::StatusCode;
 use hyper::server::{Http, NewService, Request, Response, Server, Service};
@@ -36,7 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use chrono::NaiveDate;
 use chrono::NaiveDateTime;
-use chrono::{Timelike, Duration};
+use chrono::{Duration, Timelike};
 
 pub fn make_web_server(shared: &Shared) -> Result<Server<HelloWorldSpawner, ::hyper::Body>, Error> {
     let assets_folder: PathBuf = ::std::fs::canonicalize(env::var("WEBASSETS_FOLDER")
@@ -159,6 +161,9 @@ impl Service for HelloWorld {
             Some("history") => self.serve_history(path_segments.next()),
             Some("dates") => self.serve_available_dates(),
             Some("current") => self.serve_current_temperatures(),
+            Some("set_plug_state") if _req.query().is_some() => {
+                self.set_plug_state(_req.query().unwrap())
+            }
             _ => make404(),
         };
         response_body
@@ -205,9 +210,11 @@ impl HelloWorld {
             Ok(date) => {
                 let shared = self.shared.clone();
                 box_and_convert_error(future::lazy(move || {
-
-                    let every_3_minutes = create_intervall_filtermap(Duration::minutes(3),
-                        |data : &TSDataLogEntry| JsData::from(data), 0.25);
+                    let every_3_minutes = create_intervall_filtermap(
+                        Duration::minutes(3),
+                        |data: &TSDataLogEntry| JsData::from(data),
+                        0.25,
+                    );
 
 
                     use file_db::Key;
@@ -216,16 +223,19 @@ impl HelloWorld {
                         type Value = Vec<u8>;
                     }
 
-                    let future1 = shared.db().custom_cached_by_chunk_key_async::<CachedAndFilteredMarker>
-                        (date.into(), Box::new(move |data : &[::file_db::Timestamped<DataLogEntry>] | {
-
-                        let as_vec : Vec<_> = every_3_minutes(data);
-                        let mut buf = Vec::with_capacity(0);
-                        as_vec
-                            .serialize(&mut Serializer::new(&mut buf))
-                            .print_error_and_causes();
-                        buf
-                    }));
+                    let future1 = shared
+                        .db()
+                        .custom_cached_by_chunk_key_async::<CachedAndFilteredMarker>(
+                            date.into(),
+                            Box::new(move |data: &[::file_db::Timestamped<DataLogEntry>]| {
+                                let as_vec: Vec<_> = every_3_minutes(data);
+                                let mut buf = Vec::with_capacity(0);
+                                as_vec
+                                    .serialize(&mut Serializer::new(&mut buf))
+                                    .print_error_and_causes();
+                                buf
+                            }),
+                        );
                     future1.and_then(|serialized: Arc<Vec<u8>>| {
                         let resp = Response::new()
                             .with_header(header::ContentLength(serialized.len() as u64))
@@ -246,7 +256,6 @@ impl HelloWorld {
         box_and_convert_error(future::lazy(move || {
             let future1 = shared.db().get_non_empty_chunk_keys_async();
             future1.and_then(|datesvec| {
-
                 use serde_json;
                 let json_str = serde_json::to_string(&datesvec)?;
 
@@ -261,12 +270,20 @@ impl HelloWorld {
     }
 
     fn serve_current_temperatures(&self) -> HandlerResult {
-       let shared = Rc::clone(&self.shared);
-       box_and_convert_error(future::lazy(move || {
-
+        let shared = Rc::clone(&self.shared);
+        box_and_convert_error(future::lazy(move || {
             let data = DataLogEntry::new_from_current(&shared);
 
-            let data : JsData = (&data).into(); // do better
+            #[derive(Serialize)]
+            struct Current {
+                block : JsData,
+                plug_command : String,
+            }
+
+            let data = Current {
+                block : (&data).into(), // do better
+                plug_command : format!("{:?}", shared.plug_command.get()),
+            };
 
             use serde_json;
             let json_str = serde_json::to_string(&data)?;
@@ -277,6 +294,43 @@ impl HelloWorld {
                 .with_body(json_str);
 
             Ok(resp)
+        }))
+    }
+
+    fn set_plug_state(&self, query: &str) -> HandlerResult {
+        let shared = Rc::clone(&self.shared);
+        let mut action = None;
+        for k_v in query.split('&') {
+            if !k_v.contains("=") {
+                continue;
+            }
+            let mut k_v = k_v.split("=");
+            if k_v.next() == Some("action") {
+                match k_v.next() {
+                    Some("on") => {
+                        action = Some(PlugCommand::ForceOn {
+                            until: Instant::now() + SDuration::from_secs(3600 * 12),
+                        });
+                    }
+                    Some("off") => {
+                        action = Some(PlugCommand::ForceOff {
+                            until: Instant::now() + SDuration::from_secs(3600 * 12),
+                        });
+                    }
+                    Some("auto") => {
+                        action = Some(PlugCommand::Auto);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        box_and_convert_error(future::lazy(move || match action {
+            None => Ok("do nothing".into()).map(str_to_response),
+            Some(ps) => {
+                let r = Ok(format!("set: {:?}", ps)).map(str_to_response);
+                shared.plug_command.set(ps);
+                r
+            }
         }))
     }
 }
@@ -367,14 +421,14 @@ impl<'a> From<&'a TSDataLogEntry> for JsData {
     fn from(d: &TSDataLogEntry) -> JsData {
         JsData {
             time: d.time().format("%Y-%m-%dT%H:%M:%S+0000").to_string(),
-            high : d.celsius[0] as f64 / 100.0,
-            highmid : d.celsius[1] as f64 / 100.0,
-            mid : d.celsius[2] as f64 / 100.0,
-            midlow : d.celsius[3] as f64 / 100.0,
-            low : d.celsius[4] as f64 / 100.0,
-            outside : d.celsius[5] as f64 / 100.0,
+            high: d.celsius[0] as f64 / 100.0,
+            highmid: d.celsius[1] as f64 / 100.0,
+            mid: d.celsius[2] as f64 / 100.0,
+            midlow: d.celsius[3] as f64 / 100.0,
+            low: d.celsius[4] as f64 / 100.0,
+            outside: d.celsius[5] as f64 / 100.0,
             plug_state: if d.plug_state { 1 } else { 0 },
-            reference : d.reference_celsius.unwrap_or(0) as f64 / 100.0,
+            reference: d.reference_celsius.unwrap_or(0) as f64 / 100.0,
         }
     }
 }

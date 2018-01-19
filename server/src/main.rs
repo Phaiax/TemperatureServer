@@ -65,7 +65,7 @@ use chrono::prelude::*;
 use nanoext::{NanoExtCommand, NanoextCommandSink};
 use temp::TemperatureStats;
 
-use shared::{setup_shared, Shared, SharedInner};
+use shared::{setup_shared, Shared, SharedInner, PlugCommand};
 
 use file_db::{FileDb, Timestamped};
 
@@ -249,7 +249,7 @@ fn setup_shutdown_oneshot() -> (ShutdownTrigger, ShutdownShot) {
 /// or it will gracefully quit the program when ctrl+c is pressed.
 fn handle_events(
     shared: Shared,
-    error_stream: mpsc::Receiver<Event>,
+    event_stream: mpsc::Receiver<Event>,
     mut shutdown_trigger: ShutdownTrigger,
 ) {
     let mut respawn_count: u32 = NANOEXT_RESPAWN_COUNT;
@@ -257,7 +257,7 @@ fn handle_events(
     // for moving into closure
     let shared1 = shared.clone();
 
-    let error_handler = error_stream.for_each(move |error| {
+    let event_handler = event_stream.for_each(move |error| {
         match error {
             Event::NewTemperatures => {
                 let filedb_update = shared1
@@ -265,19 +265,38 @@ fn handle_events(
                     .insert_or_update_async(DataLogEntry::new_from_current(&shared1));
                 shared1.spawn(filedb_update.print_and_forget_error());
 
-                let action = shared1.parameters.plug_action(&shared1.temperatures.get());
-                match action {
-                    PlugAction::TurnOn => if !shared1.plug_state.get() {
-                        info!("Turn Plug on");
-                        shared1.send_command_async(NanoExtCommand::PowerOn, shared1.clone());
-                        shared1.plug_state.set(true);
+                PlugCommand::check_elapsed(&shared1.plug_command);
+                match shared1.plug_command.get() {
+                    PlugCommand::Auto => {
+                        let action = shared1.parameters.plug_action(&shared1.temperatures.get());
+                        match action {
+                            PlugAction::TurnOn => if !shared1.plug_state.get() {
+                                info!("Turn Plug on");
+                                shared1.send_command_async(NanoExtCommand::PowerOn, shared1.clone());
+                                shared1.plug_state.set(true);
+                            },
+                            PlugAction::TurnOff => if shared1.plug_state.get() {
+                                info!("Turn Plug off");
+                                shared1.send_command_async(NanoExtCommand::PowerOff, shared1.clone());
+                                shared1.plug_state.set(false);
+                            },
+                            PlugAction::KeepAsIs => {}
+                        }
                     },
-                    PlugAction::TurnOff => if shared1.plug_state.get() {
-                        info!("Turn Plug off");
-                        shared1.send_command_async(NanoExtCommand::PowerOff, shared1.clone());
-                        shared1.plug_state.set(false);
+                    PlugCommand::ForceOn { .. } => {
+                        if !shared1.plug_state.get() {
+                            info!("Turn Plug on (manual)");
+                            shared1.send_command_async(NanoExtCommand::PowerOn, shared1.clone());
+                            shared1.plug_state.set(true);
+                        }
                     },
-                    PlugAction::KeepAsIs => {}
+                    PlugCommand::ForceOff { .. } => {
+                        if shared1.plug_state.get() {
+                            info!("Turn Plug off (manual)");
+                            shared1.send_command_async(NanoExtCommand::PowerOff, shared1.clone());
+                            shared1.plug_state.set(false);
+                        }
+                    },
                 }
             }
             // A Error in the NanoExt. Try to respawn max 5 times.
@@ -312,7 +331,7 @@ fn handle_events(
         future::ok(())
     });
 
-    shared.spawn(error_handler);
+    shared.spawn(event_handler);
 }
 
 pub fn setup_db_save_interval(interval: Duration, shared: Shared) {
