@@ -16,6 +16,7 @@
         <li>Zeit: <span id="curr_time"></span> </li>
         <li>Heizung: <span id="curr_plug_state"></span> </li>
         <li>Außen: <span id="curr_outside"></span>°C </li>
+        <li>Referenz: <span id="curr_reference"></span>°C </li>
     </ul>
     <div class="clear"></div>
     <ul class="current">
@@ -127,6 +128,7 @@
                 $('#curr_midlow').text(data.midlow);
                 $('#curr_low').text(data.low);
                 $('#curr_outside').text(data.outside);
+                $('#curr_reference').text(data.reference);
             });
         }
 
