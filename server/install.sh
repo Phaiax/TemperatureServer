@@ -6,6 +6,7 @@ EXECUTABLE=$(pwd)/target/debug/server
 SERVICEFILE=/etc/systemd/system/${SERVICENAME}.service
 USER=$USER
 LOG_FOLDER=${HOME}/log
+WEBASSETS_FOLDER=$(pwd)/webassets
 
 echo "** MAKE ${LOGDIRECTORY}"
 
@@ -26,6 +27,7 @@ Restart=on-abort
 Environment="LOG_FOLDER=${LOG_FOLDER}"
 Environment="RUST_BACKTRACE=1"
 Environment="RUST_LOG=info"
+Environment="WEBASSETS_FOLDER=${WEBASSETS_FOLDER}"
 
 [Install]
 WantedBy=multi-user.target
