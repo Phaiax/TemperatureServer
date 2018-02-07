@@ -44,7 +44,7 @@ pub enum PlugAction {
 impl Parameters {
     pub fn plug_action(&self, current: &TemperatureStats) -> PlugAction {
         let sensor_id: usize = self.use_sensor.into();
-        let current : f64 = ::temp::raw2celsius(&current.mean)[sensor_id];
+        let current : f64 = ::temp::raw2celsius(&current.mean).iter().min();
         if current >= self.plug_trigger_off.get().0 {
             PlugAction::TurnOff
         } else if current <= self.plug_trigger_on.get().0 {
@@ -58,8 +58,8 @@ impl Parameters {
 impl Default for Parameters {
     fn default() -> Parameters {
         Parameters {
-            plug_trigger_on: Cell::new(Celsius(-0.2)),
-            plug_trigger_off: Cell::new(Celsius(0.2)),
+            plug_trigger_on: Cell::new(Celsius(0.5)),
+            plug_trigger_off: Cell::new(Celsius(0.7)),
             //plug_trigger_on: Cell::new(Celsius(22.5)),
             //plug_trigger_off: Cell::new(Celsius(23.0)),
             use_sensor: Sensor::Fourth,
