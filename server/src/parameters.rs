@@ -42,9 +42,15 @@ pub enum PlugAction {
 }
 
 impl Parameters {
-    pub fn plug_action(&self, current: &TemperatureStats) -> PlugAction {
+    pub fn plug_action(&self, current: &TemperatureStats, reference : Option<f64>) -> PlugAction {
         let _sensor_id: usize = self.use_sensor.into();
-        let all : [f64;6] = ::temp::raw2celsius(&current.mean);
+        let mut all : [f64;6] = ::temp::raw2celsius(&current.mean);
+        // skip outdoor. Hack: for now replace outdoor with 10 or the reference
+        all[5] = 10.;
+        match reference {
+            Some(s) => { all[5] = s; },
+            _ => {}
+        }
         let mut current : f64 = all.iter().fold(100., |min, i| i.min(min) );
         if current == 100. {
             current = 0.;

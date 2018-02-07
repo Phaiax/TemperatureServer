@@ -268,7 +268,8 @@ fn handle_events(
                 PlugCommand::check_elapsed(&shared1.plug_command);
                 match shared1.plug_command.get() {
                     PlugCommand::Auto => {
-                        let action = shared1.parameters.plug_action(&shared1.temperatures.get());
+                        let action = shared1.parameters.plug_action(&shared1.temperatures.get(),
+                                                                    shared1.reference_temperature.get());
                         match action {
                             PlugAction::TurnOn => if !shared1.plug_state.get() {
                                 info!("Turn Plug on");
