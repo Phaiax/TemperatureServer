@@ -17,7 +17,7 @@ pub fn raw2celsius(raw: &[f64; 6]) -> [f64; 6] {
         raw2celsius_single(raw[2], 2.83330737e-02, -3.42368415e-03, 9.48931324e-06),
         raw2celsius_single(raw[3], 4.90349955e-02, -6.16875325e-03, 1.66562829e-05),
         raw2celsius_single(raw[4], 4.70466017e-02, -5.83030411e-03, 1.53853008e-05),
-        raw2celsius_single(raw[5], 2.07942145e-02, -2.39393274e-03, 6.63539211e-06),
+        raw2celsius_single(raw[5], 5.49063589e-03, -4.51545766e-04, 2.00477893e-06),
     ]
 }
 
@@ -28,7 +28,7 @@ pub fn raw2celsius100(raw: &[f64; 6]) -> [i16; 6] {
         (raw2celsius_single(raw[2], 2.83330737e-02, -3.42368415e-03, 9.48931324e-06) * 100. ) as i16 ,
         (raw2celsius_single(raw[3], 4.90349955e-02, -6.16875325e-03, 1.66562829e-05) * 100. ) as i16 ,
         (raw2celsius_single(raw[4], 4.70466017e-02, -5.83030411e-03, 1.53853008e-05) * 100. ) as i16 ,
-        (raw2celsius_single(raw[5], 2.07942145e-02, -2.39393274e-03, 6.63539211e-06) * 100. ) as i16 ,
+        (raw2celsius_single(raw[5], 5.49063589e-03, -4.51545766e-04, 2.00477893e-06) * 100. ) as i16 ,
     ]
 }
 

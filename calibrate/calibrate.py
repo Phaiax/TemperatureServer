@@ -3,7 +3,193 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
+import msgpack
 
+from os import listdir
+from os.path import isfile, join
+
+
+
+
+
+
+
+# the 100ks # A7..A2 #order is ok
+onehundreds_at0deg = [99700, 101200, 102200, 102900, 102900, 98600]
+onehundreds_at25deg = [9900, 100300, 101200, 101900, 101900, 97900]
+
+
+
+
+# Thermristor B-equation (T in Kelvin)
+# R = R_N * exp(-B ( 1/T_N - 1/T ))
+# T = B / ln (R / r_inf)
+# with r_inf = R_N * exp(-B / T_N)
+# T_N = 25 deg Celsius
+# R_N = 100k Ohm
+
+# Steinhard-Hart equation
+# 1/T = a + b ln(R) + c (ln(R))**3
+# or
+# R = exp( 3root( y - x/2 ) - 3root( y + x/2 ))
+# x = 1/c ( a - 1/T)
+# y = sqrt( (b/(3*c))**3 + (x/2)**2 )
+
+# equals B-equation when
+# a=(1/T_0)-(1/B)*ln(R_0)
+# b=1/B
+# c=0
+
+# LSQ     Ah=y    h=(A^T A)^-1 A^T y
+# WLSQ    Ah=y    h=(A^T W A)^-1 A^T W y
+
+# Solve Steinhard-Hart with LSQ using this gls
+
+# [1/T_i]       [ 1   ln(R_i) ln**3(R_i) ]  [ a ]
+# [  .  ]       [ .      .          .    ]  [ b ]
+# [  .  ]   =   [ .      .          .    ]  [ c ]
+# [  .  ]       [ .      .          .    ]
+
+
+
+# raw -> R
+# raw = R/(R+100k) * 1023
+# <=>  raw*R + raw*100k = R * 1023
+# <=>  raw * 100k = R ( 1023 - raw )
+# <=>  R = (raw * 100k) / ( 1023 - raw )
+def raw2R(raw, R_ref):
+    return (raw * R_ref) / (1023 - raw)
+
+# Solve for one temperature sensor
+# Input: Measurements     [t]     [d]
+#                         [.]     [ ]
+#                         [.]     [ ]
+def lsq(temperatures, raws, weights, R_ref):
+    assert len(temperatures) == len(raws)
+    R = np.array([raw2R(r, R_ref) for r in raws])
+    Tinv = np.array([1/(t+273.15) for t in temperatures])
+
+    # W = Phi^-1
+    # P Phi P^T = I
+    # KovarMatrix = sigma^2 (A^T W A)^-1
+    W = np.diag(weights)
+    #print weights
+
+    A = np.zeros((len(R), 3))
+    for i, r in enumerate(R):
+        A[i, 0] = 1
+        A[i, 1] = np.log(r)
+        A[i, 2] = A[i, 1] ** 3
+
+    h = np.linalg.lstsq(A, Tinv)
+    tmp = np.matmul(A.transpose(), W)
+    tmp2 = np.linalg.inv(np.matmul(tmp, A))
+    tmp3 = np.matmul(np.matmul(tmp2, A.transpose()), W)
+    h2 = np.dot(tmp3, Tinv)
+
+    # print h[0]
+    # print h2
+    # assert h[0] == h2
+    return h2
+    pass
+
+
+def plot(a, b, c):
+    ts = np.arange(-20., 30., 1.)
+    ts = ts + 273.15
+    # x = 1/c ( a - 1/T)
+    x = 1./c * ( a - 1./ts)
+    # y = sqrt( (b/(3*c))**3 + (x/2)**2 )
+    y = np.sqrt( (b/(3*c))**3 + (x/2)**2 )
+    # R = exp( 3root( y - x/2 ) - 3root( y + x/2 ))
+    R = np.exp( ( y - x/2 )**(1./3) -( y + x/2 )**(1./3) )
+
+    plt.plot(x, y, 'r')
+
+
+def plot2(a, b, c, R_ref):
+    raws = np.arange(100., 900., 1.)
+    Rs = raw2R(raws, R_ref)
+
+    Tinv = a + b * np.log(Rs) + c * (np.log(Rs))**3
+    Ts = (1/Tinv) - 273.15
+    plt.plot(raws, Ts, 'r')
+
+
+
+
+
+
+
+
+
+
+filedbpath = "/home/daniel/tmp/tempcalib"
+
+db_files = [join(filedbpath, f) for f in listdir(filedbpath) if isfile(join(filedbpath, f)) and f.endswith(".db.v2")]
+
+f = db_files[0]
+db_files.sort()
+
+print("Use {} database files.".format(len(db_files)))
+# print(db_files)
+
+total_entries = 0
+data = []
+
+for db_file in db_files:
+    with open(db_file, "r") as f:
+        unpacker = msgpack.Unpacker(f)
+        logdata = unpacker.__next__()
+        #logdata = logdata[0::100]
+        total_entries += len(logdata)
+        data.append(logdata)
+
+total_entries = total_entries/100
+
+print("Found {} log entries.".format(total_entries))
+
+sensors_raws = np.zeros(shape=(total_entries,1))
+temps = np.zeros(shape=(total_entries,1))
+weights = np.ones(shape=(total_entries))
+
+i = 0
+j = 0
+sensors_raw_mid = 0
+tems_mid = 0
+for d in data:
+    for e in d:
+        if i == total_entries:
+            break
+        if j == 100:
+            sensors_raws[i] = sensors_raw_mid / 100.
+            temps[i] = tems_mid / 100.
+            i += 1
+            sensors_raw_mid = 0.
+            tems_mid = 0.
+            j = 0
+
+        sensors_raw_mid += e[1][0][5]
+        tems_mid += e[1][3] / 100.
+        j += 1
+
+
+timeshift = 1 # x*100 samples
+#sensors_raws = sensors_raws[timeshift:]
+#temps = temps[:-timeshift]
+#weights = weights[timeshift:]
+
+cs = lsq(temps, sensors_raws, weights, [onehundreds_at0deg[5]])
+
+print(cs)
+
+plot2(cs[0], cs[1], cs[2], R_ref=onehundreds_at0deg[5])
+plt.plot(sensors_raws, temps, 'o', label='Original data', markersize=10)
+
+plt.show()
+
+
+exit()
 
 #
 # -1.6  ,  720.8   720.6   633.6   590.2   624.7   691.0
@@ -124,107 +310,6 @@ weights = [0.2, 0.2,
  1,1,1,1,
  1,1,
  1,1] #weight of measurement
-
-# the 100ks # A7..A2 #order is ok
-onehundreds_at0deg = [99700, 101200, 102200, 102900, 102900, 98600]
-onehundreds_at25deg = [9900, 100300, 101200, 101900, 101900, 97900]
-
-
-
-
-# Thermristor B-equation (T in Kelvin)
-# R = R_N * exp(-B ( 1/T_N - 1/T ))
-# T = B / ln (R / r_inf)
-# with r_inf = R_N * exp(-B / T_N)
-# T_N = 25 deg Celsius
-# R_N = 100k Ohm
-
-# Steinhard-Hart equation
-# 1/T = a + b ln(R) + c (ln(R))**3
-# or
-# R = exp( 3root( y - x/2 ) - 3root( y + x/2 ))
-# x = 1/c ( a - 1/T)
-# y = sqrt( (b/(3*c))**3 + (x/2)**2 )
-
-# equals B-equation when
-# a=(1/T_0)-(1/B)*ln(R_0)
-# b=1/B
-# c=0
-
-# LSQ     Ah=y    h=(A^T A)^-1 A^T y
-# WLSQ    Ah=y    h=(A^T W A)^-1 A^T W y
-
-# Solve Steinhard-Hart with LSQ using this gls
-
-# [1/T_i]       [ 1   ln(R_i) ln**3(R_i) ]  [ a ]
-# [  .  ]       [ .      .          .    ]  [ b ]
-# [  .  ]   =   [ .      .          .    ]  [ c ]
-# [  .  ]       [ .      .          .    ]
-
-
-
-# raw -> R
-# raw = R/(R+100k) * 1023
-# <=>  raw*R + raw*100k = R * 1023
-# <=>  raw * 100k = R ( 1023 - raw )
-# <=>  R = (raw * 100k) / ( 1023 - raw )
-def raw2R(raw, R_ref):
-    return (raw * R_ref) / (1023 - raw)
-
-# Solve for one temperature sensor
-# Input: Measurements     [t]     [d]
-#                         [.]     [ ]
-#                         [.]     [ ]
-def lsq(temperatures, raws, weights, R_ref):
-    assert len(temperatures) == len(raws)
-    R = np.array([raw2R(r, R_ref) for r in raws])
-    Tinv = np.array([1/(t+273.15) for t in temperatures])
-
-    # W = Phi^-1
-    # P Phi P^T = I
-    # KovarMatrix = sigma^2 (A^T W A)^-1
-    W = np.diag(weights)
-    #print W
-
-    A = np.zeros((len(R), 3))
-    for i, r in enumerate(R):
-        A[i, 0] = 1
-        A[i, 1] = np.log(r)
-        A[i, 2] = A[i, 1] ** 3
-
-    h = np.linalg.lstsq(A, Tinv)
-    tmp = np.matmul(A.transpose(), W)
-    tmp2 = np.linalg.inv(np.matmul(tmp, A))
-    tmp3 = np.matmul(np.matmul(tmp2, A.transpose()), W)
-    h2 = np.dot(tmp3, Tinv)
-
-    # print h[0]
-    # print h2
-    # assert h[0] == h2
-    return h2
-    pass
-
-
-def plot(a, b, c):
-    ts = np.arange(-20., 30., 1.)
-    ts = ts + 273.15
-    # x = 1/c ( a - 1/T)
-    x = 1./c * ( a - 1./ts)
-    # y = sqrt( (b/(3*c))**3 + (x/2)**2 )
-    y = np.sqrt( (b/(3*c))**3 + (x/2)**2 )
-    # R = exp( 3root( y - x/2 ) - 3root( y + x/2 ))
-    R = np.exp( ( y - x/2 )**(1./3) -( y + x/2 )**(1./3) )
-
-    plt.plot(x, y, 'r')
-
-
-def plot2(a, b, c, R_ref):
-    raws = np.arange(100., 900., 1.)
-    Rs = raw2R(raws, R_ref)
-
-    Tinv = a + b * np.log(Rs) + c * (np.log(Rs))**3
-    Ts = (1/Tinv) - 273.15
-    plt.plot(raws, Ts, 'r')
 
 
 
