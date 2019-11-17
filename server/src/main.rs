@@ -2,33 +2,6 @@
 #![allow(dead_code)]
 #![recursion_limit = "128"]
 
-extern crate bytes;
-extern crate chrono;
-extern crate dotenv;
-extern crate env_logger;
-#[macro_use]
-extern crate failure;
-extern crate file_db;
-extern crate futures;
-extern crate futures_cpupool;
-extern crate handlebars;
-extern crate hyper;
-#[macro_use]
-extern crate lazy_static;
-extern crate libc;
-#[macro_use]
-extern crate log;
-extern crate regex;
-extern crate rmp_serde as rmps;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-extern crate tokio_core;
-extern crate tokio_inotify;
-extern crate tokio_io;
-// extern crate tokio_serial;
-extern crate tokio_signal;
 
 mod nanoext;
 mod web;
@@ -45,9 +18,11 @@ use std::env;
 use std::time::Duration;
 use std::path::PathBuf;
 
-use log::{LogLevelFilter, LogRecord};
+use log::{LogLevelFilter, LogRecord, log, info, warn, error, debug};
 use env_logger::{LogBuilder, LogTarget};
 use dotenv::dotenv;
+
+use serde_derive::{Serialize, Deserialize};
 
 use futures::{future, Future};
 use futures::Stream;

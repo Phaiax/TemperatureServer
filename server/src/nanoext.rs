@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use failure::{err_msg, Error, ResultExt};
+use log::{log, error}; // macro
 
 use futures::Stream;
 use futures::stream::SplitSink;

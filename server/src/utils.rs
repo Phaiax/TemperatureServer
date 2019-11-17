@@ -1,7 +1,7 @@
 
 use futures::Future;
 use failure::Error;
-
+use log::{log, error};
 
 mod print_and_forget_error {
 

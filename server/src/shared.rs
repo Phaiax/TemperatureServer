@@ -1,4 +1,5 @@
 
+use log::{log, error}; // macro
 use crate::nanoext::{NanoExtCommand, NanoextCommandSink};
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};

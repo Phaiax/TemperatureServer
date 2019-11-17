@@ -18,7 +18,7 @@ use failure::{Error, ResultExt};
 
 use crate::lock::ExclusiveFilesystembasedLock;
 
-use rmps::{Deserializer as MsgPackDeserializer, Serializer as MsgPackSerializer};
+use rmp_serde::{Deserializer as MsgPackDeserializer, Serializer as MsgPackSerializer};
 use serde::Serialize;
 use serde::de::{Deserialize, DeserializeOwned};
 

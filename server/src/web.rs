@@ -16,7 +16,7 @@ use crate::env;
 use tokio_inotify::AsyncINotify;
 use crate::PlugCommand;
 
-use failure::{Error, ResultExt};
+use failure::{Error, ResultExt, bail};
 
 use crate::shared::Shared;
 use crate::DataLogEntry;
@@ -33,8 +33,9 @@ use futures::Stream;
 
 use handlebars::Handlebars;
 
-use crate::rmps::{Deserializer, Serializer};
+use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
+use serde_derive::{Deserialize, Serialize};
 
 use chrono::NaiveDate;
 use chrono::NaiveDateTime;
