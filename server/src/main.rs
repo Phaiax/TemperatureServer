@@ -18,8 +18,8 @@ use std::env;
 use std::time::Duration;
 use std::path::PathBuf;
 
-use log::{LogLevelFilter, LogRecord, log, info, warn, error, debug};
-use env_logger::{LogBuilder, LogTarget};
+use log::{LevelFilter, Record as LogRecord, log, info, warn, error, debug};
+use env_logger::{Builder as LogBuilder, Target as LogTarget};
 use dotenv::dotenv;
 
 use serde_derive::{Serialize, Deserialize};
@@ -183,24 +183,20 @@ fn run() -> Result<(), Error> {
 }
 
 pub fn init_logger() {
-    let format = |record: &LogRecord| {
+    use std::io::Write;
+    let mut builder = LogBuilder::from_default_env();
+    builder.target(LogTarget::Stdout);
+    builder.format(|buf, record| {
         let local: DateTime<Local> = Local::now();
-        format!(
+        writeln!(buf,
             "{} - {} - {}",
             local.to_rfc2822(),
             record.level(),
             record.args()
         )
-    };
-
-    let mut builder = LogBuilder::new();
-    builder.target(LogTarget::Stdout);
-    builder.format(format);
-    builder.filter(None, LogLevelFilter::Info);
-    if let Ok(log_spec) = env::var("RUST_LOG") {
-        builder.parse(&log_spec);
-    }
-    builder.init().unwrap();
+    });
+    builder.filter(None, LevelFilter::Info);
+    builder.init();
 }
 
 type ShutdownTrigger = Box<dyn FnMut() -> ()>;
