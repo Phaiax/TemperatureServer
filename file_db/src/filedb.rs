@@ -16,7 +16,7 @@ use futures_cpupool::{CpuFuture, CpuPool};
 
 use failure::{Error, ResultExt};
 
-use lock::ExclusiveFilesystembasedLock;
+use crate::lock::ExclusiveFilesystembasedLock;
 
 use rmps::{Deserializer as MsgPackDeserializer, Serializer as MsgPackSerializer};
 use serde::Serialize;
@@ -86,7 +86,8 @@ struct Chunk<CData: ChunkableData> {
 
 /// The Hashmap from ChunkKeys to chunks.
 /// Each chunk is mutexed.
-type Chunks<CData: ChunkableData> = HashMap<CData::ChunkKey, Arc<Mutex<Chunk<CData>>>>;
+type Chunks<CData/*: ChunkableData [lint: not enforced anyway]*/>
+     = HashMap<<CData as ChunkableData>::ChunkKey, Arc<Mutex<Chunk<CData>>>>;
 
 /// The database type.
 /// Filedb stores chunked data into a folder addressable by key and chunk key.
@@ -167,6 +168,7 @@ impl<CData: ChunkableData> Chunk<CData> {
         Ok(())
     }
 
+
     pub fn update<F, R>(&mut self, f: F) -> Result<R, Error>
     where
         F: FnOnce(&mut Vec<CData>) -> R,
@@ -196,7 +198,7 @@ impl<CData: ChunkableData> Chunk<CData> {
 
     pub fn custom_cached<K: TypeMapKey>(
         &mut self,
-        f: Box<Fn(&[CData]) -> K::Value>,
+        f: Box<dyn Fn(&[CData]) -> K::Value>,
     ) -> Result<Arc<K::Value>, Error>
     where
         K::Value: Send + Sync,
@@ -347,7 +349,7 @@ impl<CData: ChunkableData> FileDb<CData> {
     pub fn save_all(&self) -> CpuFuture<(), Error> {
         let chunks = self.chunks.clone();
 
-        let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
+        let f: Box<dyn Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunks = chunks.lock().unwrap();
             for (ref _chunk_key, ref chunk) in (*chunks).iter() {
                 chunk.lock().unwrap().sync_to_disk()?;
@@ -384,7 +386,7 @@ impl<CData: ChunkableData> FileDb<CData> {
         let path_base = self.path_base.clone();
         let version_postfix = self.version_postfix;
 
-        let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
+        let f: Box<dyn Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunk = Self::get_or_create_by_chunk_key(
                 &chunks,
                 data.chunk_key(),
@@ -406,7 +408,7 @@ impl<CData: ChunkableData> FileDb<CData> {
     pub fn custom_cached_by_chunk_key_async<K: TypeMapKey>(
         &self,
         chunk_key: CData::ChunkKey,
-        filter_function: Box<Fn(&[CData]) -> K::Value + Send + Sync + 'static>,
+        filter_function: Box<dyn Fn(&[CData]) -> K::Value + Send + Sync + 'static>,
     ) -> CpuFuture<Arc<K::Value>, Error>
     where
         K::Value: Send + Sync,
@@ -415,7 +417,7 @@ impl<CData: ChunkableData> FileDb<CData> {
         let path_base = self.path_base.clone();
         let version_postfix = self.version_postfix;
 
-        let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
+        let f: Box<dyn Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunk = Self::get_or_create_by_chunk_key(&chunks, chunk_key, path_base, version_postfix);
             let r = chunk.lock().unwrap().custom_cached::<K>(filter_function);
             Self::result_to_future_with_context(r, "Could not serialize special")
@@ -433,7 +435,7 @@ impl<CData: ChunkableData> FileDb<CData> {
         let path_base = self.path_base.clone();
         let version_postfix = self.version_postfix;
 
-        let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
+        let f: Box<dyn Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunk = Self::get_or_create_by_chunk_key(&chunks, chunk_key, path_base, version_postfix);
             let r = chunk.lock().unwrap().get_shared_vec();
             Self::result_to_future_with_context(r, "Could not get by chunk_key")
@@ -447,7 +449,7 @@ impl<CData: ChunkableData> FileDb<CData> {
         let path_base = self.path_base.clone();
         let version_postfix = self.version_postfix;
 
-        let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
+        let f: Box<dyn Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunk = Self::get_or_create_by_chunk_key(&chunks, key.into(), path_base, version_postfix);
             let r = chunk.lock().unwrap().get_by_key(key);
             Self::result_to_future_with_context(r, "Could not get by datetime")
@@ -459,7 +461,7 @@ impl<CData: ChunkableData> FileDb<CData> {
     pub fn get_non_empty_chunk_keys_async(&self) -> CpuFuture<Vec<CData::ChunkKey>, Error> {
         let chunks = self.chunks.clone();
 
-        let f: Box<Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
+        let f: Box<dyn Future<Item = _, Error = _> + Send> = Box::new(future::lazy(move || {
             let chunks = chunks.lock().unwrap();
             let mut chunk_keys = Vec::with_capacity(chunks.len());
 

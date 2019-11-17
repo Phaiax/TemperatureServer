@@ -13,8 +13,8 @@ use futures::unsync::mpsc::Sender;
 use tokio_io::codec::{Decoder, Encoder, Framed};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_core::reactor::Handle;
-use tokio_serial::{BaudRate, DataBits, FlowControl, Parity, Serial, SerialPort,
-                   SerialPortSettings, StopBits};
+//use tokio_serial::{BaudRate, DataBits, FlowControl, Parity, Serial, SerialPort,
+//                   SerialPortSettings, StopBits};
 
 use bytes::BytesMut;
 use bytes::buf::BufMut;
@@ -24,67 +24,68 @@ use shared::Shared;
 use NANOEXT_SERIAL_DEVICE;
 use Event;
 
-pub type NanoextCommandSink = SplitSink<Framed<Serial, NanoextCodec>>;
+pub type NanoextCommandSink = (); // SplitSink<Framed<Serial, NanoextCodec>>;
 
 /// `error_sink` can be used to respawn the serial handler
-pub fn init_serial_port(shared: Shared) -> Result<NanoextCommandSink, Error>  {
-    let serialsetting = SerialPortSettings {
-        baud_rate: BaudRate::Baud9600,
-        data_bits: DataBits::Eight,
-        flow_control: FlowControl::None,
-        parity: Parity::None,
-        stop_bits: StopBits::One,
-        timeout: Duration::from_millis(1000),
-    };
+pub fn init_serial_port(_shared: Shared) -> Result<NanoextCommandSink, Error>  {
+    // let serialsetting = SerialPortSettings {
+    //     baud_rate: BaudRate::Baud9600,
+    //     data_bits: DataBits::Eight,
+    //     flow_control: FlowControl::None,
+    //     parity: Parity::None,
+    //     stop_bits: StopBits::One,
+    //     timeout: Duration::from_millis(1000),
+    // };
 
-    let serial = Serial::from_path(NANOEXT_SERIAL_DEVICE, &serialsetting, &shared.handle())
-        .context("NANOEXT not connected")?;
+    // let serial = Serial::from_path(NANOEXT_SERIAL_DEVICE, &serialsetting, &shared.handle())
+    //     .context("NANOEXT not connected")?;
 
-    let serial = serial.framed(NanoextCodec::new());
-    let (serial_write, serial_read) = serial.split();
+    // let serial = serial.framed(NanoextCodec::new());
+    // let (serial_write, serial_read) = serial.split();
 
-    let shared_clone = shared.clone(); // for moving into closure
-    let shared_clone2 = shared.clone(); // for moving into closure
+    // let shared_clone = shared.clone(); // for moving into closure
+    // let shared_clone2 = shared.clone(); // for moving into closure
 
-    let mut every_i = 0u32;
+    // let mut every_i = 0u32;
 
-    // `for_each` processes the `Stream` of decoded Tlog20Codec::Items (`f64`)
-    // and returns a future that represents this processing until the end of time.
-    // We can only spawn `Future<Item = (), Error = ()>`.
-    let serialfuture = serial_read
-        .for_each(move |ts| {
-            // New Item arrived
+    // // `for_each` processes the `Stream` of decoded Tlog20Codec::Items (`f64`)
+    // // and returns a future that represents this processing until the end of time.
+    // // We can only spawn `Future<Item = (), Error = ()>`.
+    // let serialfuture = serial_read
+    //     .for_each(move |ts| {
+    //         // New Item arrived
 
-            // Print every x item
-            every_i += 1;
-            if every_i == 10 {
-                shared_clone.handle_event_async(Event::NewTemperatures);
-                //info!("{:?}", ts.1);
-                every_i = 0;
-            }
+    //         // Print every x item
+    //         every_i += 1;
+    //         if every_i == 10 {
+    //             shared_clone.handle_event_async(Event::NewTemperatures);
+    //             //info!("{:?}", ts.1);
+    //             every_i = 0;
+    //         }
 
-            // save into shared data
-            shared_clone.temperatures.set(ts.1);
-            shared_clone.nanoext_connected.set(true);
+    //         // save into shared data
+    //         shared_clone.temperatures.set(ts.1);
+    //         shared_clone.nanoext_connected.set(true);
 
-            // This closure must return a future `Future<Item = (), Error = Tlog20Codec::Error>`.
-            // `for_each` will run this future to completion before processing the next item.
-            // But we can simply return an empty future.
-            future::ok(())
-        })
-        .or_else(move |_e| {
-            // Map the error type to `()`, but at least print the error.
-            error!("NANOEXT decoder? error: {:?}", _e);
-            // Will maybe spawn a new Nanoext
-            shared_clone2.handle_event_async(Event::NanoExtDecoderError);
-            shared_clone2.nanoext_connected.set(false);
-            future::err(())
-        });
+    //         // This closure must return a future `Future<Item = (), Error = Tlog20Codec::Error>`.
+    //         // `for_each` will run this future to completion before processing the next item.
+    //         // But we can simply return an empty future.
+    //         future::ok(())
+    //     })
+    //     .or_else(move |_e| {
+    //         // Map the error type to `()`, but at least print the error.
+    //         error!("NANOEXT decoder? error: {:?}", _e);
+    //         // Will maybe spawn a new Nanoext
+    //         shared_clone2.handle_event_async(Event::NanoExtDecoderError);
+    //         shared_clone2.nanoext_connected.set(false);
+    //         future::err(())
+    //     });
 
 
-    shared.handle().spawn(serialfuture);
+    // shared.handle().spawn(serialfuture);
 
-    Ok(serial_write)
+    // Ok(serial_write)
+    panic!("Functionality removed");
 }
 
 

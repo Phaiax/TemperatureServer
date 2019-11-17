@@ -151,34 +151,35 @@ impl SharedInner {
     ///
     /// If another sink appeared when the original sink comes home (connection reset),
     /// then redo the command.
-    pub fn send_command_async(&self, cmd : NanoExtCommand, shared : Shared) {
+    pub fn send_command_async(&self, cmd : NanoExtCommand, _shared : Shared) {
         match self.nanoext_command_sink.borrow_mut().take() {
-            Some(sink) => {
-                let send_and_return_home = sink.send(cmd).and_then(move |sink| {
-                    // Put the `sink` to `shared` if the spot is still empty.
-                    // I don't know if it can happen that the spot is already filled
-                    // by a new connection. If the spot is filled, I would expect
-                    // that the write on the old sink (that one we just got back) had failed.
-                    // Then we would enter the `or_else` part.
-                    if shared.nanoext_command_sink.borrow_mut().take().is_some() {
-                        debug!("Successful send on old sink, but new sink present.");
-                        // TODO: redo command! (should we use timestamps to be able to reject
-                        // old commands?)
-                    } else {
-                        shared.nanoext_command_sink.borrow_mut().get_or_insert(sink);
-                        // Trigger pending command
-                        if let Some(next) = shared.pending_nanoext_command.borrow_mut().take() {
-                            shared.send_command_async(next, shared.clone());
-                        }
-                    }
-                    future::ok(())
-                }).or_else(|error : Error| {
-                    error!("Could not send command to Nanoext. ({})", error);
-                    // We should trigger the next command, but we do not have a sink.
-                    // The `put_command_sink` command will take care of a pending command.
-                    future::err(())
-                });
-                self.spawn(send_and_return_home);
+            Some(_sink) => {
+                unimplemented!();
+                // let send_and_return_home = sink.send(cmd).and_then(move |sink| {
+                //     // Put the `sink` to `shared` if the spot is still empty.
+                //     // I don't know if it can happen that the spot is already filled
+                //     // by a new connection. If the spot is filled, I would expect
+                //     // that the write on the old sink (that one we just got back) had failed.
+                //     // Then we would enter the `or_else` part.
+                //     if shared.nanoext_command_sink.borrow_mut().take().is_some() {
+                //         debug!("Successful send on old sink, but new sink present.");
+                //         // TODO: redo command! (should we use timestamps to be able to reject
+                //         // old commands?)
+                //     } else {
+                //         shared.nanoext_command_sink.borrow_mut().get_or_insert(sink);
+                //         // Trigger pending command
+                //         if let Some(next) = shared.pending_nanoext_command.borrow_mut().take() {
+                //             shared.send_command_async(next, shared.clone());
+                //         }
+                //     }
+                //     future::ok(())
+                // }).or_else(|error : Error| {
+                //     error!("Could not send command to Nanoext. ({})", error);
+                //     // We should trigger the next command, but we do not have a sink.
+                //     // The `put_command_sink` command will take care of a pending command.
+                //     future::err(())
+                // });
+                // self.spawn(send_and_return_home);
             },
             None => {
                 // Put `cmd` into pending

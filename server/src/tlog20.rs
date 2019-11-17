@@ -17,8 +17,8 @@ use futures::{future, Future};
 use tokio_io::codec::{Decoder, Encoder};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_core::reactor::Handle;
-use tokio_serial::{BaudRate, DataBits, FlowControl, Parity, Serial, SerialPort,
-                   SerialPortSettings, StopBits};
+//use tokio_serial::{BaudRate, DataBits, FlowControl, Parity, Serial, SerialPort,
+//                   SerialPortSettings, StopBits};
 
 use bytes::BytesMut;
 
@@ -28,48 +28,48 @@ use TLOG20_SERIAL_DEVICE;
 
 
 
-pub fn init_serial_port(shared: Shared) -> Result<(), Error> {
-    let serialsetting = SerialPortSettings {
-        baud_rate: BaudRate::Baud4800,
-        data_bits: DataBits::Eight,
-        flow_control: FlowControl::None,
-        parity: Parity::None,
-        stop_bits: StopBits::One,
-        timeout: Duration::from_millis(15000),
-    };
+pub fn init_serial_port(_shared: Shared) -> Result<(), Error> {
+    // let serialsetting = SerialPortSettings {
+    //     baud_rate: BaudRate::Baud4800,
+    //     data_bits: DataBits::Eight,
+    //     flow_control: FlowControl::None,
+    //     parity: Parity::None,
+    //     stop_bits: StopBits::One,
+    //     timeout: Duration::from_millis(15000),
+    // };
 
-    let serial = Serial::from_path(TLOG20_SERIAL_DEVICE, &serialsetting, &shared.handle())
-        .context("TLOG20 not connected")?;
+    // let serial = Serial::from_path(TLOG20_SERIAL_DEVICE, &serialsetting, &shared.handle())
+    //     .context("TLOG20 not connected")?;
 
-    let serial = serial.framed(Tlog20Codec::new());
+    // let serial = serial.framed(Tlog20Codec::new());
 
-    let shared_clone = shared.clone(); // for moving into closure
-    let shared_clone2 = shared.clone(); // for moving into closure
+    // let shared_clone = shared.clone(); // for moving into closure
+    // let shared_clone2 = shared.clone(); // for moving into closure
 
-    // `for_each` processes the `Stream` of decoded Tlog20Codec::Items (`f64`)
-    // and returns a future that represents this processing until the end of time.
-    // We can only spawn `Future<Item = (), Error = ()>`.
-    let serialfuture = serial
-        .for_each(move |ts| {
-            // New Item arrived
-            shared_clone.reference_temperature.set(Some(ts));
-            shared_clone.tlog20_connected.set(true);
-            // This closure must return a future `Future<Item = (), Error = Tlog20Codec::Error>`.
-            // `for_each` will run this future to completion before processing the next item.
-            // But we can simply return an empty future.
-            future::ok(())
-        })
-        .or_else(move |_e| {
-            // Map the error type to `()`, but at least print the error.
-            error!("TLOG20 decoder error: {:?}", _e);
-            shared_clone2.reference_temperature.set(None);
-            shared_clone2.nanoext_connected.set(false);
-            future::err(())
-        });
+    // // `for_each` processes the `Stream` of decoded Tlog20Codec::Items (`f64`)
+    // // and returns a future that represents this processing until the end of time.
+    // // We can only spawn `Future<Item = (), Error = ()>`.
+    // let serialfuture = serial
+    //     .for_each(move |ts| {
+    //         // New Item arrived
+    //         shared_clone.reference_temperature.set(Some(ts));
+    //         shared_clone.tlog20_connected.set(true);
+    //         // This closure must return a future `Future<Item = (), Error = Tlog20Codec::Error>`.
+    //         // `for_each` will run this future to completion before processing the next item.
+    //         // But we can simply return an empty future.
+    //         future::ok(())
+    //     })
+    //     .or_else(move |_e| {
+    //         // Map the error type to `()`, but at least print the error.
+    //         error!("TLOG20 decoder error: {:?}", _e);
+    //         shared_clone2.reference_temperature.set(None);
+    //         shared_clone2.nanoext_connected.set(false);
+    //         future::err(())
+    //     });
 
 
 
-    shared.handle().spawn(serialfuture);
+    // shared.handle().spawn(serialfuture);
 
     Ok(())
 }

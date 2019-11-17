@@ -60,7 +60,7 @@ pub use typemap::Key;
 #[cfg(test)]
 mod tests {
 
-    use futures_cpupool::CpuPool;
+    //use futures_cpupool::CpuPool;
     use std::path::{Path, PathBuf};
     use std::fs::create_dir;
     use std::ops::Deref;
@@ -191,7 +191,7 @@ mod tests {
 
         // filter every minute
         let filter_one_per_minute =
-            create_intervall_filtermap(Duration::minutes(1), |data : &TestData| data.a as usize, 0.25);
+            create_intervall_filtermap(Duration::minutes(1), |data : &Timestamped<TestData>| data.a as usize, 0.25);
 
 
         let filtered_cache: Arc<Vec<usize>> =
@@ -217,7 +217,7 @@ mod tests {
         }
 
         let filter_one_per_minute =
-            create_intervall_filtermap(Duration::minutes(1), |data : &TestData| data.a as usize, 0.25);
+            create_intervall_filtermap(Duration::minutes(1), |data : &Timestamped<TestData>| data.a as usize, 0.25);
 
         let filtered_cache2: Arc<Vec<usize>> =
             db.custom_cached_by_chunk_key_async::<CachedSerializationType>(date, filter_one_per_minute)

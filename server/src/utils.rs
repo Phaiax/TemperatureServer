@@ -121,7 +121,7 @@ pub fn print_error_and_causes<E>(err: E) where E: Into<Error> {
 }
 
 
-pub struct OnDrop(Option<Box<FnMut() -> ()>>);
+pub struct OnDrop(Option<Box<dyn FnMut() -> ()>>);
 
 impl OnDrop {
     pub fn execute_on_drop<F>(closure: F) -> OnDrop where F : FnMut() -> () + 'static {

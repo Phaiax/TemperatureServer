@@ -142,7 +142,7 @@ pub struct HelloWorld {
     assets_folder: Rc<PathBuf>,
 }
 
-type HandlerResult = Box<Future<Item = Response, Error = ::hyper::Error>>;
+type HandlerResult = Box<dyn Future<Item = Response, Error = ::hyper::Error>>;
 
 impl Service for HelloWorld {
     // boilerplate hooking up hyper's server types

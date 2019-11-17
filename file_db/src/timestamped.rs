@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use failure::Error;
 
-use filedb::{ChunkableData, ToFilenamePart};
+use crate::filedb::{ChunkableData, ToFilenamePart};
 use chrono::{Duration, NaiveDate, NaiveDateTime};
 use chrono::prelude::*;
 
@@ -58,6 +58,9 @@ impl<D: Clone + Send + Sync + 'static> Deref for Timestamped<D> {
 
 
 #[derive(Hash, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
+/// A wrapper, because the ChunkKey associated type of Chunkable data has trait
+/// bounds that cannot be implemented on an external type.
+/// This is the ChunkKey of the Timestamped<> type
 pub struct NaiveDateWrapper(pub NaiveDate);
 
 impl From<NaiveDateTime> for NaiveDateWrapper {
@@ -93,7 +96,11 @@ impl ToFilenamePart for NaiveDateWrapper {
     }
 }
 
-
+/// Creates a boxed closure that can filter a slice `&[Timestamped<D>]`
+/// so that in the resulting list, there is at most one entry per `every` time.
+/// The elements are mapped via `map` at the same time.
+/// `capacity_multiplier` is a factor that is used to preallocate the resulting vector
+/// based on the elements of the input slice.
 pub fn create_intervall_filtermap<
     D: Serialize + DeserializeOwned + Clone + Send + Sync + 'static,
     FM,
@@ -102,7 +109,7 @@ pub fn create_intervall_filtermap<
     every: Duration,
     map: FM,
     capacity_multiplier: f32,
-) -> Box<Fn(&[Timestamped<D>]) -> Vec<R> + Send + Sync + 'static>
+) -> Box<dyn Fn(&[Timestamped<D>]) -> Vec<R> + Send + Sync + 'static>
 where
     FM: Fn(&Timestamped<D>) -> R + Send + Sync + 'static,
 {

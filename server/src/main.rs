@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(dead_code)]
 #![recursion_limit = "128"]
 
 extern crate bytes;
@@ -26,7 +27,7 @@ extern crate serde_json;
 extern crate tokio_core;
 extern crate tokio_inotify;
 extern crate tokio_io;
-extern crate tokio_serial;
+// extern crate tokio_serial;
 extern crate tokio_signal;
 
 mod nanoext;
@@ -227,7 +228,7 @@ pub fn init_logger() {
     builder.init().unwrap();
 }
 
-type ShutdownTrigger = Box<FnMut() -> ()>;
+type ShutdownTrigger = Box<dyn FnMut() -> ()>;
 type ShutdownShot = oneshot::Receiver<()>;
 
 fn setup_shutdown_oneshot() -> (ShutdownTrigger, ShutdownShot) {
@@ -450,6 +451,7 @@ mod tokio_stdin {
         Channel(SendError<Line>),
     }
 
+    #[allow(unused_must_use)]
     pub fn spawn_stdin_stream() -> StdInStream {
         let (channel_sink, channel_stream) = channel(super::STDIN_BUFFER_SIZE);
 
