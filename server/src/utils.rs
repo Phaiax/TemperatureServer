@@ -110,7 +110,7 @@ impl<T, E> ResultExt<T, E> for Result<T, E> {
 
 pub fn print_error_and_causes<E>(err: E) where E: Into<Error> {
     let err = err.into();
-    for (i, cause) in err.causes().enumerate() {
+    for (i, cause) in err.iter_chain().enumerate() {
         if i == 0 {
             error!("{}", cause);
         } else {

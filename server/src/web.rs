@@ -352,7 +352,7 @@ where
             Err(err) => {
                 use std::fmt::Write;
                 let mut buf = String::with_capacity(1000);
-                for (i, cause) in err.causes().enumerate() {
+                for (i, cause) in err.iter_chain().enumerate() {
                     if i == 0 {
                         write!(buf, "<p>{}</p>", cause).unwrap();
                     } else {
