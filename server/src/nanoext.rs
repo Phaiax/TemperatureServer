@@ -19,10 +19,10 @@ use tokio_core::reactor::Handle;
 use bytes::BytesMut;
 use bytes::buf::BufMut;
 
-use temp::{TemperatureStats, Temperatures};
-use shared::Shared;
-use NANOEXT_SERIAL_DEVICE;
-use Event;
+use crate::temp::{TemperatureStats, Temperatures};
+use crate::shared::Shared;
+use crate::NANOEXT_SERIAL_DEVICE;
+use crate::Event;
 
 pub type NanoextCommandSink = (); // SplitSink<Framed<Serial, NanoextCodec>>;
 

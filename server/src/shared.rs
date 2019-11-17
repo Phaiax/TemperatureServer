@@ -1,16 +1,16 @@
 
-use nanoext::{NanoExtCommand, NanoextCommandSink};
+use crate::nanoext::{NanoExtCommand, NanoextCommandSink};
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
 use std::time::Instant;
-use temp::TemperatureStats;
+use crate::temp::TemperatureStats;
 use tokio_core::reactor::Handle;
 use futures::{future, Future, Sink};
 use futures::unsync::mpsc;
 use failure::Error;
-use Event;
-use parameters::Parameters;
-use MyFileDb;
+use crate::Event;
+use crate::parameters::Parameters;
+use crate::MyFileDb;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum PlugCommand {

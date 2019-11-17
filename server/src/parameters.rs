@@ -1,6 +1,6 @@
 
 use std::cell::Cell;
-use temp::TemperatureStats;
+use crate::temp::TemperatureStats;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Sensor {
@@ -44,7 +44,7 @@ pub enum PlugAction {
 impl Parameters {
     pub fn plug_action(&self, current: &TemperatureStats, reference : Option<f64>) -> PlugAction {
         let _sensor_id: usize = self.use_sensor.into();
-        let mut all : [f64;6] = ::temp::raw2celsius(&current.mean);
+        let mut all : [f64;6] = crate::temp::raw2celsius(&current.mean);
         // skip outdoor. Hack: for now replace outdoor with 10 or the reference
         all[5] = 10.;
         match reference {

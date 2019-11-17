@@ -63,16 +63,16 @@ use failure::{err_msg, Error, Fail, ResultExt};
 
 use chrono::prelude::*;
 
-use nanoext::{NanoExtCommand, NanoextCommandSink};
-use temp::TemperatureStats;
+use crate::nanoext::{NanoExtCommand, NanoextCommandSink};
+use crate::temp::TemperatureStats;
 
-use shared::{setup_shared, Shared, SharedInner, PlugCommand};
+use crate::shared::{setup_shared, Shared, SharedInner, PlugCommand};
 
 use file_db::{FileDb, Timestamped};
 
-use parameters::PlugAction;
+use crate::parameters::PlugAction;
 
-use utils::FutureExt;
+use crate::utils::FutureExt;
 
 pub const NANOEXT_SERIAL_DEVICE: &'static str =
     "/dev/serial/by-id/usb-1a86_USB2.0-Serial-if00-port0";
@@ -110,7 +110,7 @@ impl DataLogEntry {
         //let reference = shared1.
         let mut new = DataLogEntry {
             mean: [0; 6],
-            celsius: ::temp::raw2celsius100(&temps.mean),
+            celsius: crate::temp::raw2celsius100(&temps.mean),
             plug_state,
             reference_celsius: shared
                 .reference_temperature
