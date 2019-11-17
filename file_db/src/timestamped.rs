@@ -5,6 +5,7 @@ use std::ops::Deref;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde_derive::{Serialize, Deserialize};
 use failure::Error;
 
 use crate::filedb::{ChunkableData, ToFilenamePart};

@@ -4,7 +4,8 @@ use std::fs::{remove_file, File};
 use std::os::unix::io::AsRawFd;
 use std::io::Write;
 
-use failure::Error;
+use log::{error};
+use failure::{Error, bail};
 
 use libc::c_int;
 use libc::getpid;

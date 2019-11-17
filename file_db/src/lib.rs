@@ -33,22 +33,6 @@
 
 #![allow(dead_code, unused_variables)]
 
-extern crate chrono;
-extern crate dotenv;
-extern crate env_logger;
-#[macro_use]
-extern crate failure;
-extern crate futures;
-extern crate futures_cpupool;
-extern crate libc;
-#[macro_use]
-extern crate log;
-extern crate rmp_serde as rmps;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate typemap;
-
 mod filedb;
 pub mod timestamped;
 pub mod lock;

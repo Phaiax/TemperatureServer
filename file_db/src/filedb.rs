@@ -14,7 +14,8 @@ use std::marker::PhantomData;
 use futures01::{future, Future};
 use futures_cpupool::{CpuFuture, CpuPool};
 
-use failure::{Error, ResultExt};
+use failure::{Error, ResultExt, bail};
+use log::{error};
 
 use crate::lock::ExclusiveFilesystembasedLock;
 
