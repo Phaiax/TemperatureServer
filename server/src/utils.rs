@@ -1,12 +1,12 @@
 
-use futures::Future;
+use futures01::Future;
 use failure::Error;
 use log::{log, error};
 
 mod print_and_forget_error {
 
-    use futures::Future;
-    use futures::{Poll, Async};
+    use futures01::Future;
+    use futures01::{Poll, Async};
     use failure::Error;
     use super::print_error_and_causes;
 

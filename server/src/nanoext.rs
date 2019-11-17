@@ -5,11 +5,11 @@ use std::time::{Duration, Instant};
 use failure::{err_msg, Error, ResultExt};
 use log::{log, error}; // macro
 
-use futures::Stream;
-use futures::stream::SplitSink;
-use futures::Sink;
-use futures::{future, Future};
-use futures::unsync::mpsc::Sender;
+use futures01::Stream;
+use futures01::stream::SplitSink;
+use futures01::Sink;
+use futures01::{future, Future};
+use futures01::unsync::mpsc::Sender;
 
 use tokio_io::codec::{Decoder, Encoder, Framed};
 use tokio_io::{AsyncRead, AsyncWrite};

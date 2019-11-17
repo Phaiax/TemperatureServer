@@ -27,9 +27,9 @@ use hyper::StatusCode;
 use hyper::server::{Http, NewService, Request, Response, Server, Service};
 use hyper::header;
 
-use futures::future::{self, Future};
-use futures;
-use futures::Stream;
+use futures01::future::{self, Future};
+use futures01;
+use futures01::Stream;
 
 use handlebars::Handlebars;
 

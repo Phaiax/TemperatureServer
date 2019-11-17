@@ -5,7 +5,8 @@ authors = ["Phaiax <phaiax-git@invisibletower.de>"]
 edition = "2018"
 
 [dependencies]
-futures = "0.1"
+futures01 = { package = "futures", version = "0.1" }
+futures = { version = "0.3", features = ["compat"] }
 futures-cpupool = "0.1"
 failure = "*"
 log = "0.4"

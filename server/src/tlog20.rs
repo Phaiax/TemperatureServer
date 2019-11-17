@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use failure::{err_msg, Error, ResultExt};
 
-use futures::Stream;
-use futures::{future, Future};
+use futures01::Stream;
+use futures01::{future, Future};
 use tokio_io::codec::{Decoder, Encoder};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_core::reactor::Handle;

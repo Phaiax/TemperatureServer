@@ -66,7 +66,7 @@ mod tests {
     use std::ops::Deref;
     use filedb::{ChunkableData, FileDb};
     use timestamped::Timestamped;
-    use futures::Future;
+    use futures01::Future;
 
     #[derive(Serialize, Deserialize, Clone)]
     struct TestData {

@@ -24,11 +24,11 @@ use dotenv::dotenv;
 
 use serde_derive::{Serialize, Deserialize};
 
-use futures::{future, Future};
-use futures::Stream;
-use futures::unsync::mpsc;
-use futures::unsync::oneshot;
-use futures::Sink;
+use futures01::{future, Future};
+use futures01::Stream;
+use futures01::unsync::mpsc;
+use futures01::unsync::oneshot;
+use futures01::Sink;
 
 use tokio_core::reactor::{Handle, Interval};
 use tokio_signal::unix::Signal;
@@ -407,9 +407,9 @@ fn setup_serial_watch_and_reinit(shared: Shared) -> Result<(), Error> {
 // But buffer lines instead of sending each byte by itself
 mod tokio_stdin {
 
-    use futures::stream::iter_result;
-    use futures::{Future, Sink, Stream};
-    use futures::sync::mpsc::{channel, Receiver, SendError};
+    use futures01::stream::iter_result;
+    use futures01::{Future, Sink, Stream};
+    use futures01::sync::mpsc::{channel, Receiver, SendError};
     use std::io::{self, BufRead};
     use std::thread;
 

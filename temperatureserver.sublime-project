@@ -2,8 +2,15 @@
 	"folders":
 	[
 		{
-			"path": ".",
-			"folder_exclude_patterns": ["target"]
+			"folder_exclude_patterns":
+			[
+				"target"
+			],
+			"path": "."
 		}
 	],
+	"settings":
+	{
+		"rust_syntax_checking": false
+	}
 }

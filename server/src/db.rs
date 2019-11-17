@@ -9,7 +9,7 @@ use diesel_infer_schema;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 
-use futures::{future, Future};
+use futures01::{future, Future};
 
 use futures_cpupool::CpuPool;
 

@@ -11,7 +11,7 @@ use std::io::{BufReader, BufWriter};
 use std::io::prelude::*;
 use std::marker::PhantomData;
 
-use futures::{future, Future};
+use futures01::{future, Future};
 use futures_cpupool::{CpuFuture, CpuPool};
 
 use failure::{Error, ResultExt};
