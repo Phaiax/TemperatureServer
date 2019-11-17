@@ -5,3 +5,4 @@ server/target
 server/log
 server/log2
 target
+*.sublime-workspace
