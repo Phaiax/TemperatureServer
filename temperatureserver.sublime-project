@@ -11,6 +11,13 @@
 	],
 	"settings":
 	{
+		"LSP":
+		{
+			"rls":
+			{
+				"enabled": true
+			}
+		},
 		"rust_syntax_checking": false
 	}
 }

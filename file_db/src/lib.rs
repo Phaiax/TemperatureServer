@@ -48,9 +48,9 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::fs::create_dir;
     use std::ops::Deref;
-    use filedb::{ChunkableData, FileDb};
-    use timestamped::Timestamped;
-    use futures01::Future;
+    use crate::filedb::{ChunkableData, FileDb};
+    use crate::timestamped::Timestamped;
+    use serde_derive::{Serialize, Deserialize};
 
     #[derive(Serialize, Deserialize, Clone)]
     struct TestData {
@@ -60,19 +60,19 @@ mod tests {
 
     type MyDb = FileDb<Timestamped<TestData>>;
 
-    fn clear_db(database_url: &PathBuf) {
-        let db = MyDb::new(&database_url, 2, "v1").unwrap();
-        db.clear_all_data_ondisk_and_in_memory().unwrap();
+    async fn clear_db(database_url: &PathBuf) {
+        let db = MyDb::new(&database_url, 2, "v1").await.unwrap();
+        db.clear_all_data_ondisk_and_in_memory().await.unwrap();
     }
 
-    #[test]
-    fn test_db() {
+    #[async_std::test]
+    async fn test_db() {
         let database_url: PathBuf = "/tmp/file_db_test".into();
         create_dir(&database_url).ok();
 
-        clear_db(&database_url);
+        clear_db(&database_url).await;
 
-        let db = MyDb::new(&database_url, 2, "v1").unwrap();
+        let db = MyDb::new(&database_url, 2, "v1").await.unwrap();
 
 
         let testdata = Timestamped::now(TestData {
@@ -82,21 +82,21 @@ mod tests {
         let date = testdata.chunk_key();
 
         let pooloperation = db.insert_or_update_async(testdata.clone());
-        let testdata_returned = pooloperation.wait().unwrap();
+        let testdata_returned = pooloperation.await.unwrap();
         assert_eq!(testdata.a, testdata_returned.a);
 
         // Add entry while holding the vec (so the vec must be cloned)
-        let vec = db.get_by_chunk_key_async(date).wait().unwrap();
+        let vec = db.get_by_chunk_key_async(date).await.unwrap();
         assert_eq!(vec[0].a, testdata.a);
         db.insert_or_update_async(Timestamped::now(testdata.deref().clone()))
-            .wait()
+            .await
             .unwrap();
         assert_eq!(vec.len(), 1);
-        let vec = db.get_by_chunk_key_async(date).wait().unwrap();
+        let vec = db.get_by_chunk_key_async(date).await.unwrap();
         assert_eq!(vec.len(), 2);
 
 
-        let and_back = db.get_by_key_async(testdata.key()).wait().unwrap().unwrap();
+        let and_back = db.get_by_key_async(testdata.key()).await.unwrap().unwrap();
         assert!(and_back.a == testdata.a);
 
 
@@ -117,8 +117,8 @@ mod tests {
         let date_created = data_file.metadata().unwrap().modified().unwrap();
 
         // reopen and reread data
-        let db = MyDb::new(&database_url, 2, "v1").unwrap();
-        let and_back = db.get_by_key_async(testdata.key()).wait().unwrap().unwrap();
+        let db = MyDb::new(&database_url, 2, "v1").await.unwrap();
+        let and_back = db.get_by_key_async(testdata.key()).await.unwrap().unwrap();
         assert!(and_back.b == testdata.b);
         drop(db);
         // we had no changes, so the file should not have been saved again
@@ -126,15 +126,15 @@ mod tests {
         assert_eq!(date_created, date_no_modification);
 
         // clear db
-        clear_db(&database_url);
+        clear_db(&database_url).await;
         assert!(!data_file.is_file());
         assert!(!lockfile.is_file());
 
         // reopen and reread data should fail
-        let db = MyDb::new(&database_url, 2, "v1").unwrap();
+        let db = MyDb::new(&database_url, 2, "v1").await.unwrap();
         assert!(
             db.get_by_key_async(testdata.key())
-                .wait()
+                .await
                 .unwrap()
                 .is_none()
         );
@@ -143,7 +143,7 @@ mod tests {
     use typemap::Key;
     use std::sync::Arc;
     use chrono::{Duration, NaiveDateTime};
-    use timestamped::create_intervall_filtermap;
+    use crate::timestamped::create_intervall_filtermap;
 
     struct CachedSerializationType;
     impl Key for CachedSerializationType {
@@ -151,14 +151,14 @@ mod tests {
     }
 
 
-    #[test]
-    fn test_caching() {
+    #[async_std::test]
+    async fn test_caching() {
         let database_url: PathBuf = "/tmp/file_db_test".into();
         create_dir(&database_url).ok();
 
-        clear_db(&database_url);
+        clear_db(&database_url).await;
 
-        let db = MyDb::new(&database_url, 2, "v1").unwrap();
+        let db = MyDb::new(&database_url, 2, "v1").await.unwrap();
 
         for i in 1..1000 {
             let testdata = Timestamped::at(
@@ -168,10 +168,10 @@ mod tests {
                     b: vec![1, 3, 5, 235],
                 },
             );
-            db.insert_or_update_async(testdata.clone()).wait().unwrap();
+            db.insert_or_update_async(testdata.clone()).await.unwrap();
         }
 
-        let date = db.get_non_empty_chunk_keys_async().wait().unwrap()[0];
+        let date = db.get_non_empty_chunk_keys_async().await.unwrap()[0];
 
         // filter every minute
         let filter_one_per_minute =
@@ -180,7 +180,7 @@ mod tests {
 
         let filtered_cache: Arc<Vec<usize>> =
             db.custom_cached_by_chunk_key_async::<CachedSerializationType>(date, filter_one_per_minute)
-                .wait()
+                .await
                 .unwrap();
 
         // So with 4 entries per minute, and 1000 entries, there should be around 250 left.
@@ -197,7 +197,7 @@ mod tests {
                     b: vec![1, 3, 5, 235],
                 },
             );
-            db.insert_or_update_async(testdata.clone()).wait().unwrap();
+            db.insert_or_update_async(testdata.clone()).await.unwrap();
         }
 
         let filter_one_per_minute =
@@ -205,14 +205,14 @@ mod tests {
 
         let filtered_cache2: Arc<Vec<usize>> =
             db.custom_cached_by_chunk_key_async::<CachedSerializationType>(date, filter_one_per_minute)
-                .wait()
+                .await
                 .unwrap();
 
         assert_eq!(filtered_cache.len(), 250);
         assert_eq!(filtered_cache2.len(), 500);
 
         drop(db);
-        clear_db(&database_url);
+        clear_db(&database_url).await;
     }
 
 }

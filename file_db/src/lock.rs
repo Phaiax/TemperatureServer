@@ -1,8 +1,11 @@
 
-use std::path::PathBuf;
-use std::fs::{remove_file, File};
+use async_std::prelude::*;
+use async_std::write;
+use async_std::path::PathBuf;
+use async_std::fs::File;
+use std::fs::remove_file;
 use std::os::unix::io::AsRawFd;
-use std::io::Write;
+//use std::io::Write;
 
 use log::{error};
 use failure::{Error, bail};
@@ -34,23 +37,23 @@ enum FlockResult {
 }
 
 impl ExclusiveFilesystembasedLock {
-    pub fn try_set_lock(path: PathBuf) -> Result<ExclusiveFilesystembasedLock, Error> {
-        if path.is_file() {
+    pub async fn try_set_lock(path: PathBuf) -> Result<ExclusiveFilesystembasedLock, Error> {
+        if path.is_file().await {
             // At first, don't truncate the file, because we do not want to overwrite the pid.
-            let file = File::open(&path)?;
-            match Self::place_lock(&file)? {
+            let file = File::open(&path).await?;
+            match Self::place_lock(&file).await? {
                 FlockResult::AlreadyLocked => bail!("Already locked"),
                 FlockResult::LockPlaced => {}
             }
             // release file and lock, we want to truncate the file and write our own pid.
         }
 
-        let mut file = File::create(&path)?;
-        match Self::place_lock(&file)? {
+        let mut file = File::create(&path).await?;
+        match Self::place_lock(&file).await? {
             FlockResult::AlreadyLocked => bail!("Already locked. (Datarace?)"),
             FlockResult::LockPlaced => {}
         }
-        Self::write_pid(&mut file)?;
+        Self::write_pid(&mut file).await?;
 
         Ok(ExclusiveFilesystembasedLock {
             file: file,
@@ -58,7 +61,7 @@ impl ExclusiveFilesystembasedLock {
         })
     }
 
-    fn place_lock(file: &File) -> Result<FlockResult, Error> {
+    async fn place_lock(file: &File) -> Result<FlockResult, Error> {
         let fd = file.as_raw_fd() as i32 as c_int;
 
 
@@ -92,10 +95,10 @@ impl ExclusiveFilesystembasedLock {
         }
     }
 
-    fn write_pid(file: &mut File) -> Result<(), Error> {
+    async fn write_pid(file: &mut File) -> Result<(), Error> {
         let pid = unsafe { getpid() } as i32;
-        write!(file, "{}", pid)?;
-        file.sync_all()?;
+        write!(file, "{}", pid).await?;
+        file.sync_all().await?;
         Ok(())
     }
 }

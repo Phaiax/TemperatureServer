@@ -5,7 +5,7 @@ authors = ["Phaiax <phaiax-git@invisibletower.de>"]
 edition = "2018"
 
 [dependencies]
-async-std = { version = "1.0", features = ["unstable"] }
+async-std = { version = "1.0", features = ["unstable", "attributes"] }
 futures01 = { package = "futures", version = "0.1" }
 futures = { version = "0.3", features = ["compat"] }
 futures-cpupool = "0.1"
