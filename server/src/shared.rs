@@ -1,8 +1,13 @@
 
+use async_std::prelude::*;
+use async_std::sync::{Arc, Mutex};
+
+
 use log::{log, error}; // macro
 use crate::nanoext::{NanoExtCommand, NanoextCommandSink};
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 use crate::temp::TemperatureStats;
 use tokio_core::reactor::Handle;
@@ -56,36 +61,36 @@ impl PlugCommand {
 
 // Todo: make newtype struct and create accessor methods for pub fields. Then remove shared argument
 // in the member functions of SharedInner below. (do impl Shared instead)
-pub type Shared = Rc<SharedInner>;
+pub type Shared = Arc<SharedInner>;
 
 pub struct SharedInner {
-    pub temperatures: Cell<TemperatureStats>,
-    pub plug_state : Cell<bool>,
-    pub plug_command : Cell<PlugCommand>,
-    pub reference_temperature : Cell<Option<f64>>,
+    pub temperatures: Mutex<TemperatureStats>,
+    pub plug_state : AtomicBool,
+    pub plug_command : Mutex<PlugCommand>,
+    pub reference_temperature : Mutex<Option<f64>>,
     event_sink: mpsc::Sender<Event>,
-    pending_nanoext_command : RefCell<Option<NanoExtCommand>>,
-    nanoext_command_sink: RefCell<Option<NanoextCommandSink>>,
-    reactor_handle: RefCell<Option<Handle>>,
-    pub nanoext_connected : Cell<bool>,
-    pub tlog20_connected : Cell<bool>,
+    pending_nanoext_command : Mutex<Option<NanoExtCommand>>,
+    nanoext_command_sink: Mutex<Option<NanoextCommandSink>>,
+    reactor_handle: Mutex<Option<Handle>>,
+    pub nanoext_connected : AtomicBool,
+    pub tlog20_connected : AtomicBool,
     db : MyFileDb,
     pub parameters : Parameters,
 }
 
 pub fn setup_shared(event_sink : mpsc::Sender<Event>, db : MyFileDb) -> Shared {
 
-    Rc::new(SharedInner {
-        temperatures: Cell::new(TemperatureStats::default()),
+    Arc::new(SharedInner {
+        temperatures: Mutex::new(TemperatureStats::default()),
         event_sink,
-        plug_state : Cell::new(false),
-        plug_command : Cell::new(PlugCommand::Auto),
-        reference_temperature : Cell::new(None),
-        pending_nanoext_command : RefCell::new(None),
-        nanoext_command_sink : RefCell::new(None),
-        reactor_handle: RefCell::new(None),
-        nanoext_connected: Cell::new(false),
-        tlog20_connected: Cell::new(false),
+        plug_state : AtomicBool::new(false),
+        plug_command : Mutex::new(PlugCommand::Auto),
+        reference_temperature : Mutex::new(None),
+        pending_nanoext_command : Mutex::new(None),
+        nanoext_command_sink : Mutex::new(None),
+        reactor_handle: Mutex::new(None),
+        nanoext_connected: AtomicBool::new(false),
+        tlog20_connected: AtomicBool::new(false),
         db,
         parameters : Parameters::default(),
     })

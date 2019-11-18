@@ -3,6 +3,7 @@
 #![recursion_limit = "128"]
 
 
+mod sensors;
 mod nanoext;
 mod web;
 mod temp;
@@ -23,6 +24,9 @@ use env_logger::{Builder as LogBuilder, Target as LogTarget};
 use dotenv::dotenv;
 
 use serde_derive::{Serialize, Deserialize};
+
+use async_std::prelude::*;
+use async_std::task::spawn;
 
 use futures01::{future, Future};
 use futures01::Stream;
@@ -58,6 +62,9 @@ pub const NANOEXT_RESPAWN_COUNT: u32 = 5;
 pub const STDIN_BUFFER_SIZE: usize = 1000;
 
 // pub const TEMPERATURE_STORAGE_INTERVAL_SECONDS : usize
+
+pub const SENSOR_FILE_PATH: &'static str =
+    "/home/pi/sensors";
 
 
 pub enum Event {
@@ -115,7 +122,7 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), Error> {
+async fn run() -> Result<(), Error> {
     // Oneshot to exit event loop
     let (shutdown_trigger, shutdown_shot) = setup_shutdown_oneshot();
 
@@ -123,7 +130,7 @@ fn run() -> Result<(), Error> {
     let (event_sink, event_stream) = mpsc::channel::<Event>(1);
 
     // Open Database and create thread for asyncronity
-    let db = MyFileDb::new_from_env("LOG_FOLDER", 2, "v2")?;
+    let db = MyFileDb::new_from_env("LOG_FOLDER", 2, "v2").await?;
 
     // Setup shared data (Handle and CommandSink still missing)
     let shared = setup_shared(event_sink, db);
@@ -153,7 +160,7 @@ fn run() -> Result<(), Error> {
     setup_ctrlc_forwarding(shared.clone());
 
     // Handle stdin. Command interpreting occours here.
-    setup_stdin_handling(shared.clone());
+    spawn(handle_stdin(shared.clone()));
 
     // Handle SIGTERM for service
     setup_sigterm_forwarding(shared.clone());
@@ -175,7 +182,7 @@ fn run() -> Result<(), Error> {
     server.run_until(shutdown_shot.map_err(|_| ())).unwrap();
 
     // save on shutdown
-    shared.db().save_all().wait().unwrap();
+    shared.db().save_all().await.unwrap();
 
     info!("SHUTDOWN! {}", Rc::strong_count(&shared));
 
@@ -349,33 +356,26 @@ fn setup_sigterm_forwarding(shared: Shared) {
 }
 
 
-fn setup_stdin_handling(shared: Shared) {
-    let stdin_stream = tokio_stdin::spawn_stdin_stream();
+async fn handle_stdin(shared: Shared) -> Result<(), Error> {
 
-    let shared1 = shared.clone();
-
-    let prog = stdin_stream
-        .for_each(move |line| {
-            match line.as_str() {
-                "rc" => {
-                    info!(
-                        "Strong count of shared: {}",
-                        ::std::rc::Rc::strong_count(&shared1)
-                    );
-                }
-                "1" => shared1.send_command_async(NanoExtCommand::PowerOn, shared1.clone()),
-                "0" => shared1.send_command_async(NanoExtCommand::PowerOff, shared1.clone()),
-                _ => {}
+    let stdin_stream = async_std::io::stdin();
+    let mut line = String::new();
+    while let _read_bytes = stdin_stream.read_line(&mut line).await? {
+        match line.as_str() {
+            "rc" => {
+                info!(
+                    "Strong count of shared: {}",
+                    async_std::sync::Arc::strong_count(&shared)
+                );
             }
-            future::ok(())
-        })
-        .map_err(|_| {
-            // Error has type ()
-            debug!("StdIn canceled.");
-            ()
-        });
+            "1" => shared.send_command_async(NanoExtCommand::PowerOn, shared.clone()),
+            "0" => shared.send_command_async(NanoExtCommand::PowerOff, shared.clone()),
+            _ => {}
+        }
 
-    shared.spawn(prog);
+        line.clear();
+    }
+    Ok(())
 }
 
 fn setup_serial_watch_and_reinit(shared: Shared) -> Result<(), Error> {
