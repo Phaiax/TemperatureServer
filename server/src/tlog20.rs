@@ -7,25 +7,25 @@
 //!
 //!
 
-use std::collections::VecDeque;
-use std::time::Duration;
+//use std::collections::VecDeque;
+//use std::time::Duration;
 
-use failure::{err_msg, Error, ResultExt};
+use failure::{Error};
 
-use futures01::Stream;
-use futures01::{future, Future};
+//use futures01::Stream;
+//use futures01::{future, Future};
 use tokio_io::codec::{Decoder, Encoder};
-use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_core::reactor::Handle;
+//use tokio_io::{AsyncRead, AsyncWrite};
+//use tokio_core::reactor::Handle;
 //use tokio_serial::{BaudRate, DataBits, FlowControl, Parity, Serial, SerialPort,
 //                   SerialPortSettings, StopBits};
 
 use bytes::BytesMut;
 
 use crate::Shared;
-use crate::TLOG20_SERIAL_DEVICE;
+//use crate::TLOG20_SERIAL_DEVICE;
 
-use log::{log, info, warn};
+use log::{info, warn};
 
 pub fn init_serial_port(_shared: Shared) -> Result<(), Error> {
     // let serialsetting = SerialPortSettings {

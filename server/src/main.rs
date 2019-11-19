@@ -1,5 +1,3 @@
-#![allow(unused_imports)]
-#![allow(dead_code)]
 #![allow(unreachable_code)]
 #![recursion_limit = "128"]
 
@@ -7,63 +5,45 @@
 mod sensors;
 mod actors;
 //mod web; // TODO
-mod tlog20;
+// mod tlog20; // TODO
 mod utils;
 
-use std::sync::RwLock;
-use std::rc::Rc;
-use std::cell::{Cell, RefCell};
-use std::env;
+use async_std::prelude::*;
+use chrono::prelude::*;
+
 use std::time::Duration;
 use std::time::Instant;
-use std::path::PathBuf;
-use std::thread;
-use std::sync::atomic::AtomicBool;
+use async_std::stream::interval;
 
-use log::{LevelFilter, Record as LogRecord, log, info, warn, error, debug};
+use log::{LevelFilter, info};
 use env_logger::{Builder as LogBuilder, Target as LogTarget};
 use dotenv::dotenv;
+use failure::Error;
 
 use serde_derive::{Serialize, Deserialize};
 
-use async_std::prelude::*;
-use async_std::task::spawn;
-use async_std::sync::{channel, Sender, Receiver, Arc};
-use async_std::stream::interval;
-use futures::channel::oneshot;
+use std::sync::atomic::AtomicBool;
 use crossbeam_utils::atomic::AtomicCell;
+use async_std::sync::{channel, Sender, Receiver, Arc};
+use futures::channel::oneshot;
 
-use futures01::{future, Future};
-use futures01::Stream;
-use futures01::unsync::mpsc;
-use futures01::Sink;
-
-use tokio_core::reactor::{Handle};
-use tokio_inotify::AsyncINotify;
-
-use failure::{err_msg, Error, Fail, ResultExt};
-
-use chrono::prelude::*;
-
-use crate::sensors::{Temperature, Temperatures, Sensor};
-use crate::actors::Heater;
-
-use file_db::{FileDb, Timestamped};
-
+use std::thread;
+use async_std::task::spawn;
 use crate::utils::FutureExt;
 
-pub const NANOEXT_SERIAL_DEVICE: &'static str =
-    "/dev/serial/by-id/usb-1a86_USB2.0-Serial-if00-port0";
+use crate::sensors::{Temperature, Temperatures, Sensor, SensorStream};
+use crate::actors::Heater;
+use file_db::{FileDb, Timestamped};
+
+//use tokio_inotify::AsyncINotify;
+
+
 pub const TLOG20_SERIAL_DEVICE: &'static str =
     "/dev/serial/by-id/usb-FTDI_US232R_FT0ILAKP-if00-port0";
-pub const NANOEXT_RESPAWN_COUNT: u32 = 5;
-
-pub const STDIN_BUFFER_SIZE: usize = 1000;
-
-// pub const TEMPERATURE_STORAGE_INTERVAL_SECONDS : usize
 
 pub const SENSOR_FILE_PATH: &'static str =
     "/home/pi/sensors";
+
 pub const HEATER_GPIO: u8 = 17;
 
 
@@ -71,30 +51,31 @@ pub const HEATER_GPIO: u8 = 17;
 
 #[async_std::main]
 async fn main() -> Result<(), Error> {
-    // Init logging
-    init_logger();
-
     // Sync environment from .env
     dotenv().ok();
+
+    // Init logging
+    init_logger();
 
     // Oneshot to exit event loop
     #[allow(unused_variables)]
     let (shutdown_trigger, shutdown_shot) = setup_shutdown_oneshot();
 
-    // Channel to the high-level event loop (see `handle_events()`)
+    // Channel from the shared context to the
+    // main event loop (see `main_event_handler_loop()`)
     let (event_sink, event_stream) = channel::<Event>(1);
 
-    // Open Database and create thread for asyncronity
+    // Open Database
     let db = MyFileDb::new_from_env("LOG_FOLDER", 2, "v2").await?;
 
-    // Setup shared data
+    // Setup shared context
     let shared = Arc::new(SharedInner {
         temperatures: AtomicCell::new(Temperatures::default()),
         event_sink,
         heater : Heater::new(HEATER_GPIO),
         control_strategy : AtomicCell::new(HeaterControlMode::Auto),
-        reference_temperature : AtomicCell::new(None),
         tlog20_connected: AtomicBool::new(false),
+        reference_temperature : AtomicCell::new(None),
         db,
         parameters : Parameters::default(),
     });
@@ -106,11 +87,12 @@ async fn main() -> Result<(), Error> {
     //shared.put_handle(server.handle()); TODO
 
     // Now connect to the Arduino (called the NanoExt)
+    spawn(temperature_read_loop(shared.clone()));
 
     // Now connect to the TLOG20, but do not fail if not present
-    tlog20::init_serial_port(shared.clone())
-        .map_err(|err| error!("{}", err))
-        .ok();
+    //tlog20::init_serial_port(shared.clone()) // TODO
+    //    .map_err(|err| error!("{}", err))
+    //    .ok();
 
     // Handle on-the-fly attachment of external hardware
     //setup_serial_watch_and_reinit(shared.clone())?;
@@ -457,5 +439,12 @@ async fn control_strategy_timeout_loop(shared: Shared) {
         if new != curr {
             shared.control_strategy.store(new);
         }
+    }
+}
+
+async fn temperature_read_loop(shared: Shared) {
+    let mut sensor_stream = SensorStream::new(Duration::from_secs(2));
+    while let Some(temps) = sensor_stream.next().await {
+        shared.temperatures.store(temps);
     }
 }

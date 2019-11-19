@@ -1,5 +1,4 @@
 use std::boxed::Box;
-use std::collections::VecDeque;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
@@ -13,7 +12,7 @@ use async_std::stream::{interval, Interval};
 use futures::future::join_all;
 use futures::future::FutureExt;
 
-use failure::{err_msg, bail, Error, Fail, ResultExt};
+use failure::{bail, Error, ResultExt};
 use log::info;
 
 use serde_derive::{Serialize, Deserialize};
@@ -123,7 +122,7 @@ impl From<Sensor> for usize {
 /// An async stream of [Option<f32>; 6] that provides new data every x seconds (see new())
 pub struct SensorStream {
     trigger: Pin<Box<Interval>>,
-    reader_future: Option<Pin<Box<dyn Future<Output=Vec<Result<Temperature, Error>>>>>>,
+    reader_future: Option<Pin<Box<dyn Future<Output=Vec<Result<Temperature, Error>>> + Send >>>,
     io_timeout: Duration
 }
 

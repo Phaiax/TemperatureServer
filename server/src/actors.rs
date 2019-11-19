@@ -1,14 +1,14 @@
 
-use async_std::prelude::*;
-use async_std::fs;
-use async_std::task::sleep;
-use async_std::sync::Mutex;
-use failure::{err_msg, Error, Fail, ResultExt};
-use async_std::path::{Path, PathBuf};
-use async_std::fs::{File};
+
 use std::time::Duration;
-use std::sync::atomic::{AtomicBool, Ordering};
-use lazy_static::lazy_static;
+use async_std::task::sleep;
+
+use async_std::sync::Mutex;
+
+use async_std::fs;
+use async_std::path::{PathBuf};
+
+use failure::Error;
 use log::info;
 
 pub struct Heater {

@@ -1,7 +1,7 @@
 
 use std::future::Future;
 use failure::Error;
-use log::{log, error};
+use log::error;
 
 
 use self::print_and_forget_error::PrintAndForgetError;
@@ -62,7 +62,7 @@ mod print_and_forget_error {
     use std::task::{Poll, Context};
     use std::pin::Pin;
     use failure::Error;
-    use pin_utils::{unsafe_pinned, unsafe_unpinned};
+    use pin_utils::{unsafe_pinned};
     use super::print_error_and_causes;
 
 
@@ -126,22 +126,3 @@ impl<T, E> ResultExt<T, E> for Result<T, E> {
 
 }
 
-
-
-
-
-pub struct OnDrop(Option<Box<dyn FnMut() -> ()>>);
-
-impl OnDrop {
-    pub fn execute_on_drop<F>(closure: F) -> OnDrop where F : FnMut() -> () + 'static {
-        OnDrop(Some(Box::new(closure)))
-    }
-}
-
-impl Drop for OnDrop {
-    fn drop(&mut self) {
-        let mut box_ = self.0.take().unwrap();
-        box_();
-    }
-
-}
