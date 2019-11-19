@@ -1,33 +1,8 @@
 
 use crossbeam_utils::atomic::AtomicCell;
 use crate::temp::TemperatureStats;
+use crate::sensors::{Sensor, Celsius};
 
-#[derive(Clone, Copy, Debug)]
-pub enum Sensor {
-    // in the order of the serial data
-    Top,
-    Sec,
-    Third,
-    Fourth,
-    Bottom,
-    Outdoor,
-}
-
-impl From<Sensor> for usize {
-    fn from(sensor : Sensor) -> usize {
-        match sensor {
-            Sensor::Top => 0,
-            Sensor::Sec => 1,
-            Sensor::Third => 2,
-            Sensor::Fourth => 3,
-            Sensor::Bottom => 4,
-            Sensor::Outdoor => 5,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Celsius(pub f64);
 
 pub struct Parameters {
     pub plug_trigger_on: AtomicCell<Celsius>,

@@ -6,7 +6,6 @@
 
 mod sensors;
 mod actors;
-mod nanoext;
 //mod web; // TODO
 mod temp;
 mod tlog20;
@@ -48,7 +47,6 @@ use failure::{err_msg, Error, Fail, ResultExt};
 
 use chrono::prelude::*;
 
-use crate::nanoext::{NanoExtCommand, NanoextCommandSink};
 use crate::temp::TemperatureStats;
 
 use crate::shared::{setup_shared, Shared, SharedInner};
@@ -156,21 +154,20 @@ async fn main() -> Result<(), Error> {
     // Handle on-the-fly attachment of external hardware
     //setup_serial_watch_and_reinit(shared.clone())?;
 
-    // Handle SIG_INT and SIG_TERM
-    setup_ctrlc_and_sigint_forwarding(shared.clone());
+    // Handle SIG_INT and SIG_TERM and forward as events to main loop
+    setup_ctrlc_and_sigint_forwarding(shared.clone()); // starts a thread
 
     // Handle stdin. Command interpreting occours here.
     spawn(stdin_handler_loop(shared.clone()));
 
-    // Handle events, including error events and do restart serial port.
     // Events can be sent via `shared.handle_event_async()`
-    setup_main_event_handler(shared.clone(), event_stream, shutdown_trigger);
+    spawn(main_event_handler_loop(shared.clone(), event_stream, shutdown_trigger));
 
     // save regulary
-    setup_db_save_interval(Duration::from_secs(60*10), shared.clone());
+    spawn(save_database_loop(Duration::from_secs(60*10), shared.clone()));
 
     // A manually commanded ForceOn/ForceOff will reset to Auto after a few minutes
-    setup_plug_command_timeout_handler(shared.clone());
+    spawn(control_strategy_timeout_loop(shared.clone()));
 
     // Init plug off
     shared.heater.turn_heater_off().await?;
@@ -226,38 +223,36 @@ fn setup_shutdown_oneshot() -> (ShutdownTrigger, ShutdownShot) {
 /// The error handler will listen on the errorchannel and
 /// will restart the serial port if there was an error
 /// or it will gracefully quit the program when ctrl+c is pressed.
-fn setup_main_event_handler(
+async fn main_event_handler_loop(
     shared: Shared,
     mut event_stream: Receiver<Event>,
     mut shutdown_trigger: ShutdownTrigger,
 ) {
-    spawn(async move {
-        while let Some(event) = event_stream.next().await {
-            match event {
-                Event::NewTemperatures => {
-                    heater_ctrl(&shared).await;
+    while let Some(event) = event_stream.next().await {
+        match event {
+            Event::NewTemperatures => {
+                heater_ctrl(&shared).await;
 
-                    shared
-                        .db()
-                        .insert_or_update_async(DataLogEntry::new_from_current(&shared).await)
-                        .print_and_forget_error().await;
-                }
-                Event::CtrlC => {
-                    info!("Ctrl-c received.");
-                    shutdown_trigger();
-                }
-                Event::SigTerm => {
-                    info!("SIGTERM received.");
-                    shutdown_trigger();
-                }
+                shared
+                    .db()
+                    .insert_or_update_async(DataLogEntry::new_from_current(&shared).await)
+                    .print_and_forget_error().await;
             }
-
+            Event::CtrlC => {
+                info!("Ctrl-c received.");
+                shutdown_trigger();
+            }
+            Event::SigTerm => {
+                info!("SIGTERM received.");
+                shutdown_trigger();
+            }
         }
-    });
+
+    }
 }
 
 async fn heater_ctrl(shared: &Shared) {
-    match shared.plug_command.load() {
+    match shared.control_strategy.load() {
         HeaterControlStrategy::Auto => {
             let current : f64 = shared.temperatures.load().mean[usize::from(shared.parameters.use_sensor)]; // Lower
             if current >= shared.parameters.plug_trigger_off.load().0 {
@@ -278,13 +273,11 @@ async fn heater_ctrl(shared: &Shared) {
 }
 
 
-pub fn setup_db_save_interval(every: Duration, shared: Shared) {
-    spawn(async move {
-        let mut interval = interval(every);
-        while let Some(_) = interval.next().await {
-            shared.db().save_all().print_and_forget_error_with_context("Could not save database").await;
-        }
-    });
+async fn save_database_loop(every: Duration, shared: Shared) {
+    let mut interval = interval(every);
+    while let Some(_) = interval.next().await {
+        shared.db().save_all().print_and_forget_error_with_context("Could not save database").await;
+    }
 }
 
 /// Handle Ctrl+c aka SIG_INT
@@ -327,15 +320,15 @@ async fn stdin_handler_loop(shared: Shared) -> Result<(), Error> {
                 );
             }
             "1" => {
-                shared.plug_command.store(HeaterControlStrategy::ForceOn{ until: Instant::now() + Duration::from_secs(3600 * 12) });
+                shared.control_strategy.store(HeaterControlStrategy::ForceOn{ until: Instant::now() + Duration::from_secs(3600 * 12) });
                 heater_ctrl(&shared).await;
             }
             "0" => {
-                shared.plug_command.store(HeaterControlStrategy::ForceOff{ until: Instant::now() + Duration::from_secs(3600 * 12) });
+                shared.control_strategy.store(HeaterControlStrategy::ForceOff{ until: Instant::now() + Duration::from_secs(3600 * 12) });
                 heater_ctrl(&shared).await;
             }
             "a" => {
-                shared.plug_command.store(HeaterControlStrategy::Auto);
+                shared.control_strategy.store(HeaterControlStrategy::Auto);
                 heater_ctrl(&shared).await;
             }
             _ => {}
@@ -347,34 +340,32 @@ async fn stdin_handler_loop(shared: Shared) -> Result<(), Error> {
 }
 
 
-fn setup_plug_command_timeout_handler(shared: Shared) {
-    spawn(async move {
-        let mut interval = interval(Duration::from_secs(1));
-        while let Some(_) = interval.next().await {
+async fn control_strategy_timeout_loop(shared: Shared) {
+    let mut interval = interval(Duration::from_secs(1));
+    while let Some(_) = interval.next().await {
 
-            let curr = shared.plug_command.load();
-            let new = match curr {
-                HeaterControlStrategy::Auto => HeaterControlStrategy::Auto,
-                HeaterControlStrategy::ForceOn { until } => {
-                    if until <= Instant::now() {
-                        HeaterControlStrategy::Auto
-                    } else {
-                        HeaterControlStrategy::ForceOn { until }
-                    }
-                },
-                HeaterControlStrategy::ForceOff { until } => {
-                    if until <= Instant::now() {
-                        HeaterControlStrategy::Auto
-                    } else {
-                        HeaterControlStrategy::ForceOff { until }
-                    }
+        let curr = shared.control_strategy.load();
+        let new = match curr {
+            HeaterControlStrategy::Auto => HeaterControlStrategy::Auto,
+            HeaterControlStrategy::ForceOn { until } => {
+                if until <= Instant::now() {
+                    HeaterControlStrategy::Auto
+                } else {
+                    HeaterControlStrategy::ForceOn { until }
                 }
-            };
-            if new != curr {
-                shared.plug_command.store(new);
+            },
+            HeaterControlStrategy::ForceOff { until } => {
+                if until <= Instant::now() {
+                    HeaterControlStrategy::Auto
+                } else {
+                    HeaterControlStrategy::ForceOff { until }
+                }
             }
+        };
+        if new != curr {
+            shared.control_strategy.store(new);
         }
-    });
+    }
 }
 
 impl HeaterControlStrategy {

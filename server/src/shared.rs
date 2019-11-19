@@ -7,7 +7,6 @@ use crossbeam_utils::atomic::AtomicCell;
 
 
 use log::{log, error}; // macro
-use crate::nanoext::{NanoExtCommand, NanoextCommandSink};
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::AtomicBool;
@@ -32,7 +31,7 @@ pub type Shared = Arc<SharedInner>;
 pub struct SharedInner {
     pub temperatures: AtomicCell<TemperatureStats>,
     pub heater : Heater,
-    pub plug_command : AtomicCell<HeaterControlStrategy>,
+    pub control_strategy : AtomicCell<HeaterControlStrategy>,
     pub reference_temperature : AtomicCell<Option<f64>>,
     event_sink: Sender<Event>,
     pub tlog20_connected : AtomicBool,
@@ -46,7 +45,7 @@ pub fn setup_shared(event_sink : Sender<Event>, db : MyFileDb, gpio: u8) -> Shar
         temperatures: AtomicCell::new(TemperatureStats::default()),
         event_sink,
         heater : Heater::new(gpio),
-        plug_command : AtomicCell::new(HeaterControlStrategy::Auto),
+        control_strategy : AtomicCell::new(HeaterControlStrategy::Auto),
         reference_temperature : AtomicCell::new(None),
         tlog20_connected: AtomicBool::new(false),
         db,

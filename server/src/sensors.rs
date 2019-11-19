@@ -18,6 +18,37 @@ use log::info;
 use crate::temp::{TemperatureStats, Temperatures};
 use crate::SENSOR_FILE_PATH;
 
+#[derive(Copy, Clone, Debug)]
+// Newtype for temperatures
+pub struct Celsius(pub f64);
+
+
+#[derive(Clone, Copy, Debug)]
+/// Assigns the array elements from a measurement ([f64; 6]) to a sensor name
+pub enum Sensor {
+    // in the order of the serial data
+    Top,
+    Sec,
+    Third,
+    Fourth,
+    Bottom,
+    Outdoor,
+}
+
+impl From<Sensor> for usize {
+    fn from(sensor : Sensor) -> usize {
+        match sensor {
+            Sensor::Top => 0,
+            Sensor::Sec => 1,
+            Sensor::Third => 2,
+            Sensor::Fourth => 3,
+            Sensor::Bottom => 4,
+            Sensor::Outdoor => 5,
+        }
+    }
+}
+
+/// An async stream of [Option<f32>; 6] that provides new data every x seconds (see new())
 pub struct SensorStream {
     trigger: Pin<Box<Interval>>,
     reader_future: Option<Pin<Box<dyn Future<Output=Vec<Result<f32, Error>>>>>>,
