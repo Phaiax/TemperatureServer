@@ -3,6 +3,59 @@ use std::future::Future;
 use failure::Error;
 use log::{log, error};
 
+
+use self::print_and_forget_error::PrintAndForgetError;
+
+
+/// Helper function to `log` info about a `failure::Error`
+pub fn print_error_and_causes<E>(err: E) where E: Into<Error> {
+    let err = err.into();
+    for (i, cause) in err.iter_chain().enumerate() {
+        if i == 0 {
+            error!("{}", cause);
+        } else {
+            error!(" > caused by: {}", cause);
+        }
+    }
+    error!("{}", err.backtrace());
+}
+
+/// Extension methods for `Future`s
+pub trait FutureExt<I> {
+
+    /// Convert a `Future<Output=Result<I, E>>` to a `Future<Output=Option<I>>`
+    /// If the Output is `Err`, then `log` the error before discarding.
+    fn print_and_forget_error(self) -> PrintAndForgetError<Self>
+    where
+        Self: Sized + Future;
+
+    /// Convert a `Future<Output=Result<I, E>>` to a `Future<Output=Option<I>>`.
+    /// If the Output is `Err`, then wrap with a `failure::Context` and `log` the error before discarding.
+    fn print_and_forget_error_with_context(self, context : &'static str) -> PrintAndForgetError<Self>
+    where
+        Self: Sized + Future;
+}
+
+// Impl for the FutureExt trait on Result-Futures
+impl<F, I, E> FutureExt<F> for F
+where
+    F: Future<Output=Result<I, E>> + Sized,
+    E: Into<Error>
+{
+    fn print_and_forget_error(self) -> PrintAndForgetError<Self>
+    {
+        PrintAndForgetError::new(self, None)
+    }
+
+    fn print_and_forget_error_with_context(self, context : &'static str) -> PrintAndForgetError<Self>
+    {
+        PrintAndForgetError::new(self, Some(context))
+    }
+}
+
+
+// Contains the helper struct for the above extension methods that implements Future
+/// (Like the struct `Map` for the combinator `.map()`)
 mod print_and_forget_error {
 
     use futures::Future;
@@ -54,41 +107,9 @@ mod print_and_forget_error {
 
 }
 
-use self::print_and_forget_error::PrintAndForgetError;
-
-pub trait FutureExt<I> {
-    fn print_and_forget_error(self) -> PrintAndForgetError<Self>
-    where
-        Self: Sized + Future;
-
-    fn print_and_forget_error_with_context(self, context : &'static str) -> PrintAndForgetError<Self>
-    where
-        Self: Sized + Future;
-}
-
-
-impl<F, I, E> FutureExt<F> for F
-where
-    F: Future<Output=Result<I, E>> + Sized,
-    E: Into<Error>
-{
-    fn print_and_forget_error(self) -> PrintAndForgetError<Self>
-//    where
-//        Self: Sized,
-    {
-        PrintAndForgetError::new(self, None)
-    }
-
-    fn print_and_forget_error_with_context(self, context : &'static str) -> PrintAndForgetError<Self>
-//    where
-//        Self: Sized,
-    {
-        PrintAndForgetError::new(self, Some(context))
-    }
-}
-
-
+/// Extension methods for `Result`s
 pub trait ResultExt<T, E> {
+    /// Like `.ok()`, but log the error via `log`
     fn print_error_and_causes(self) -> Option<T> where E: Into<Error>;
 }
 
@@ -106,17 +127,7 @@ impl<T, E> ResultExt<T, E> for Result<T, E> {
 }
 
 
-pub fn print_error_and_causes<E>(err: E) where E: Into<Error> {
-    let err = err.into();
-    for (i, cause) in err.iter_chain().enumerate() {
-        if i == 0 {
-            error!("{}", cause);
-        } else {
-            error!(" > caused by: {}", cause);
-        }
-    }
-    error!("{}", err.backtrace());
-}
+
 
 
 pub struct OnDrop(Option<Box<dyn FnMut() -> ()>>);
