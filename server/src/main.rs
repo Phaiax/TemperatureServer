@@ -58,7 +58,6 @@ async fn main() -> Result<(), Error> {
     init_logger();
 
     // Oneshot to exit event loop
-    #[allow(unused_variables)]
     let (shutdown_trigger, shutdown_shot) = setup_shutdown_oneshot();
 
     // Channel from the shared context to the
@@ -113,13 +112,16 @@ async fn main() -> Result<(), Error> {
     spawn(control_strategy_timeout_loop(shared.clone()));
 
     // Init plug off
-    shared.heater.turn_heater_off().await?;
+    shared.heater.turn_heater_off().await.ok(); // TODO replace .ok() by ?
 
     info!("START EVENT LOOP!");
 
-    // Start Webserver and block until shutdown is triggered
-    unimplemented!();
+    // Start Webserver
+    // TODO
     //server.run_until(shutdown_shot.map_err(|_| ())).unwrap();
+
+    // block until shutdown is triggered
+    shutdown_shot.await.ok();
 
     // save on shutdown
     shared.db.save_all().await.unwrap();
@@ -386,7 +388,7 @@ async fn stdin_handler_loop(shared: Shared) -> Result<(), Error> {
     let mut line = String::new();
     #[allow(irrefutable_let_patterns)]
     while let _read_bytes = stdin_stream.read_line(&mut line).await? {
-        match line.as_str() {
+        match line.as_str().trim() {
             "rc" => {
                 info!(
                     "Strong count of shared: {}",
@@ -404,6 +406,9 @@ async fn stdin_handler_loop(shared: Shared) -> Result<(), Error> {
             "a" => {
                 shared.control_strategy.store(HeaterControlMode::Auto);
                 heater_ctrl(&shared).await;
+            }
+            "t" => {
+                info!("{:?}", shared.temperatures.load());
             }
             _ => {}
         }

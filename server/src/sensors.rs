@@ -160,6 +160,7 @@ impl Stream for SensorStream {
         if let Some(reader_future) = &mut self.reader_future {
             match reader_future.as_mut().poll(cx) {
                 Poll::Ready(temps) => {
+                    self.reader_future = None;
                     return Poll::Ready(Some(Temperatures::from(temps)));
                 }
                 Poll::Pending => {

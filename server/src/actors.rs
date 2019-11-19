@@ -8,7 +8,7 @@ use async_std::sync::Mutex;
 use async_std::fs;
 use async_std::path::{PathBuf};
 
-use failure::Error;
+use failure::{Error, ResultExt};
 use log::info;
 
 pub struct Heater {
@@ -35,7 +35,7 @@ impl Heater {
 
     async fn assert_gpio_is_exported(&self) -> Result<(), Error> {
         if !self.sysfs_gpio_path.is_dir().await {
-            fs::write(&self.sysfs_gpio_export_path, &self.gpio_pin).await?;
+            fs::write(&self.sysfs_gpio_export_path, &self.gpio_pin).await.context("No GPIO in sysfs")?;
             sleep(Duration::from_millis(200)).await;
             fs::write(&self.sysfs_gpio_direction_path, "out").await?;
             sleep(Duration::from_millis(200)).await;
