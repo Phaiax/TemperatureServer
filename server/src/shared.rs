@@ -11,7 +11,6 @@ use std::rc::Rc;
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
-use crate::temp::TemperatureStats;
 use tokio_core::reactor::Handle;
 use futures01::{future, Future, Sink};
 use futures01::unsync::mpsc;
@@ -20,6 +19,7 @@ use crate::Event;
 use crate::parameters::Parameters;
 use crate::MyFileDb;
 use crate::actors::Heater;
+use crate::sensors::Temperatures;
 
 use super::HeaterControlStrategy;
 
@@ -29,7 +29,7 @@ use super::HeaterControlStrategy;
 pub type Shared = Arc<SharedInner>;
 
 pub struct SharedInner {
-    pub temperatures: AtomicCell<TemperatureStats>,
+    pub temperatures: AtomicCell<Temperatures>,
     pub heater : Heater,
     pub control_strategy : AtomicCell<HeaterControlStrategy>,
     pub reference_temperature : AtomicCell<Option<f64>>,
@@ -42,7 +42,7 @@ pub struct SharedInner {
 pub fn setup_shared(event_sink : Sender<Event>, db : MyFileDb, gpio: u8) -> Shared {
 
     Arc::new(SharedInner {
-        temperatures: AtomicCell::new(TemperatureStats::default()),
+        temperatures: AtomicCell::new(Temperatures::default()),
         event_sink,
         heater : Heater::new(gpio),
         control_strategy : AtomicCell::new(HeaterControlStrategy::Auto),

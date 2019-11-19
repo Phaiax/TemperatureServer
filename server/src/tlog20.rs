@@ -23,7 +23,6 @@ use tokio_core::reactor::Handle;
 use bytes::BytesMut;
 
 use crate::shared::Shared;
-use crate::temp::{TemperatureStats, Temperatures};
 use crate::TLOG20_SERIAL_DEVICE;
 
 use log::{log, info, warn};

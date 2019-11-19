@@ -7,7 +7,6 @@
 mod sensors;
 mod actors;
 //mod web; // TODO
-mod temp;
 mod tlog20;
 mod shared;
 mod parameters;
@@ -47,9 +46,8 @@ use failure::{err_msg, Error, Fail, ResultExt};
 
 use chrono::prelude::*;
 
-use crate::temp::TemperatureStats;
-
 use crate::shared::{setup_shared, Shared, SharedInner};
+use crate::sensors::Temperature;
 
 use file_db::{FileDb, Timestamped};
 
@@ -86,7 +84,12 @@ pub enum Event {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DataLogEntry {
-    pub mean: [u16; 6],
+    /// This field contained the filtered raw values from the temperature ADCs.
+    /// Since there is no analog measurement anymore, this field is now unused
+    /// But we must not change the layout of this struct because this is the database
+    /// entry type.
+    pub _mean: [u16; 6],
+    /// The temperature in deg Celsius * 100
     pub celsius: [i16; 6],
     pub plug_state: bool,
     pub reference_celsius: Option<i16>,
@@ -97,23 +100,15 @@ pub type MyFileDb = FileDb<TSDataLogEntry>;
 
 impl DataLogEntry {
     async fn new_from_current(shared: &Shared) -> TSDataLogEntry {
-        let temps = shared.temperatures.load();
-        let plug_state = shared.heater.is_heater_on().await.unwrap_or(false);
-        //let reference = shared1.
-        let mut new = DataLogEntry {
-            mean: [0; 6],
-            celsius: crate::temp::raw2celsius100(&temps.mean),
-            plug_state,
+        Timestamped::now(DataLogEntry {
+            _mean: [0; 6],
+            celsius: shared.temperatures.load().as_raw_with_default(Temperature::from_raw(0)),
+            plug_state: shared.heater.is_heater_on().await.unwrap_or(false),
             reference_celsius: shared
                 .reference_temperature
                 .load()
                 .map(|temp_in_degc| (temp_in_degc * 100.) as i16),
-        };
-        new.mean
-            .iter_mut()
-            .zip(temps.mean.iter())
-            .for_each(|(n, m)| *n = *m as u16);
-        Timestamped::now(new)
+        })
     }
 }
 
@@ -254,13 +249,20 @@ async fn main_event_handler_loop(
 async fn heater_ctrl(shared: &Shared) {
     match shared.control_strategy.load() {
         HeaterControlStrategy::Auto => {
-            let current : f64 = shared.temperatures.load().mean[usize::from(shared.parameters.use_sensor)]; // Lower
-            if current >= shared.parameters.plug_trigger_off.load().0 {
-                shared.heater.turn_heater_off().print_and_forget_error().await;
-            } else if current <= shared.parameters.plug_trigger_on.load().0 {
-                shared.heater.turn_heater_on().print_and_forget_error().await;
-            } else {
-                // KeepAsIs
+            match shared.temperatures.load().get(shared.parameters.use_sensor) {
+                Some(current) => {
+                    if current >= shared.parameters.plug_trigger_off.load() {
+                        shared.heater.turn_heater_off().print_and_forget_error().await;
+                    } else if current <= shared.parameters.plug_trigger_on.load() {
+                        shared.heater.turn_heater_on().print_and_forget_error().await;
+                    } else {
+                        // KeepAsIs
+                    }
+                },
+                None => {
+                    // Temperature not available -> Turn off
+                    shared.heater.turn_heater_off().print_and_forget_error().await;
+                }
             }
         }
         HeaterControlStrategy::ForceOn { .. } => {

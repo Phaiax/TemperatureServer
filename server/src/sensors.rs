@@ -4,6 +4,7 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
+use std::fmt;
 
 use async_std::fs::File;
 use async_std::path::PathBuf;
@@ -15,12 +16,83 @@ use futures::future::FutureExt;
 use failure::{err_msg, bail, Error, Fail, ResultExt};
 use log::info;
 
-use crate::temp::{TemperatureStats, Temperatures};
+use serde_derive::{Serialize, Deserialize};
+
 use crate::SENSOR_FILE_PATH;
 
-#[derive(Copy, Clone, Debug)]
-// Newtype for temperatures
-pub struct Celsius(pub f64);
+/// Temperature.
+/// The internal temperature is storea as (deg Celsius times 100)
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, Default, Ord, PartialOrd, Eq, PartialEq)]
+pub struct Temperature(pub i16);
+
+impl Temperature {
+    pub fn from_celsius(celsius : f32) -> Temperature { Temperature((celsius * 100.0) as i16) }
+    pub fn from_raw(raw : i16) -> Temperature { Temperature(raw) }
+    pub fn as_celsius(&self) -> f32 { (self.0 as f32) / 100.0 }
+    pub fn as_raw(&self) -> i16 { self.0 }
+}
+
+/// All measureable temperatures, but since
+/// ome sensors may be unavailable, some temperatues may be missing
+#[derive(Copy, Clone, Default)]
+pub struct Temperatures {
+    pub temps: [Option<Temperature>; 6],
+}
+
+impl Temperatures {
+    pub fn get(&self, sensor: Sensor) -> Option<Temperature> {
+        self.temps[usize::from(sensor)]
+    }
+
+    pub fn as_raw_with_default(&self, default: Temperature) -> [i16; 6] {
+        [
+            self.temps[0].unwrap_or(default).as_raw(),
+            self.temps[1].unwrap_or(default).as_raw(),
+            self.temps[2].unwrap_or(default).as_raw(),
+            self.temps[3].unwrap_or(default).as_raw(),
+            self.temps[4].unwrap_or(default).as_raw(),
+            self.temps[5].unwrap_or(default).as_raw(),
+        ]
+    }
+}
+
+impl fmt::Debug for Temperatures {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "Oben: ")?;
+        if self.temps[0].is_some() { write!(f, "{:.1} deg C ", self.temps[0].unwrap().0)?; }
+        else { write!(f, "- ")?; }
+        write!(f, "| Oberhalb:")?;
+        if self.temps[1].is_some() { write!(f, "{:.1} deg C ", self.temps[1].unwrap().0)?; }
+        else { write!(f, "- ")?; }
+        write!(f, "| Mitte:")?;
+        if self.temps[2].is_some() { write!(f, "{:.1} deg C ", self.temps[2].unwrap().0)?; }
+        else { write!(f, "- ")?; }
+        write!(f, "| Unterhalb:")?;
+        if self.temps[3].is_some() { write!(f, "{:.1} deg C ", self.temps[3].unwrap().0)?; }
+        else { write!(f, "- ")?; }
+        write!(f, "| Unten:")?;
+        if self.temps[4].is_some() { write!(f, "{:.1} deg C ", self.temps[4].unwrap().0)?; }
+        else { write!(f, "- ")?; }
+        write!(f, "| Außen:")?;
+        if self.temps[5].is_some() { write!(f, "{:.1} deg C ", self.temps[5].unwrap().0)?; }
+        else { write!(f, "- ")?; }
+        Ok(())
+    }
+}
+
+
+impl From<Vec<Result<Temperature, Error>>> for Temperatures {
+    fn from(from: Vec<Result<Temperature, Error>>) -> Temperatures {
+        Temperatures { temps : [
+            from[0].as_ref().map(|f| *f).ok(), // Error -> None
+            from[1].as_ref().map(|f| *f).ok(),
+            from[2].as_ref().map(|f| *f).ok(),
+            from[3].as_ref().map(|f| *f).ok(),
+            from[4].as_ref().map(|f| *f).ok(),
+            from[5].as_ref().map(|f| *f).ok(),
+        ]}
+    }
+}
 
 
 #[derive(Clone, Copy, Debug)]
@@ -51,7 +123,7 @@ impl From<Sensor> for usize {
 /// An async stream of [Option<f32>; 6] that provides new data every x seconds (see new())
 pub struct SensorStream {
     trigger: Pin<Box<Interval>>,
-    reader_future: Option<Pin<Box<dyn Future<Output=Vec<Result<f32, Error>>>>>>,
+    reader_future: Option<Pin<Box<dyn Future<Output=Vec<Result<Temperature, Error>>>>>>,
     io_timeout: Duration
 }
 
@@ -66,7 +138,7 @@ impl SensorStream {
 }
 
 impl Stream for SensorStream {
-    type Item = [Option<f32>; 6];
+    type Item = Temperatures;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.reader_future.is_none() {
@@ -89,15 +161,7 @@ impl Stream for SensorStream {
         if let Some(reader_future) = &mut self.reader_future {
             match reader_future.as_mut().poll(cx) {
                 Poll::Ready(temps) => {
-                    let temps = [
-                        temps[0].as_ref().map(|f| *f).ok(), // Error -> None
-                        temps[1].as_ref().map(|f| *f).ok(),
-                        temps[2].as_ref().map(|f| *f).ok(),
-                        temps[3].as_ref().map(|f| *f).ok(),
-                        temps[4].as_ref().map(|f| *f).ok(),
-                        temps[5].as_ref().map(|f| *f).ok(),
-                    ];
-                    return Poll::Ready(Some(temps));
+                    return Poll::Ready(Some(Temperatures::from(temps)));
                 }
                 Poll::Pending => {
                     return Poll::Pending;
@@ -112,13 +176,12 @@ impl Stream for SensorStream {
 }
 
 
-fn parse_temp(data: &str) -> Result<f32, Error> {
+fn parse_temp(data: &str) -> Result<Temperature, Error> {
     let mut parts = data.split("t=");
     let _ = parts.next();
     if let Some(part2) = parts.next() {
-        let temp_int = i32::from_str_radix(part2.trim(), 10)?;
-        let temp = (temp_int as f32) / 1000.0;
-        return Ok(temp);
+        let temp_degC1000 = i32::from_str_radix(part2.trim(), 10)?;
+        return Ok(Temperature::from_raw((temp_degC1000 / 10) as i16)); // the raw value has the unit degC*100
     }
     bail!("No `t=` in temperature data");
 }
@@ -126,7 +189,7 @@ fn parse_temp(data: &str) -> Result<f32, Error> {
 async fn read_temp_from_file(
     sensorname: &str,
     timeout: Duration,
-) -> Result<f32, Error> {
+) -> Result<Temperature, Error> {
     let data: String = async_std::io::timeout(timeout, async {
         let path = PathBuf::from(SENSOR_FILE_PATH).join(sensorname);
         let mut file = File::open(path).await?;
@@ -140,7 +203,7 @@ async fn read_temp_from_file(
     Ok(parse_temp(&data).context(data)?)
 }
 
-async fn read_all_temperatures(timeout: Duration) -> Vec<Result<f32, Error>> {
+async fn read_all_temperatures(timeout: Duration) -> Vec<Result<Temperature, Error>> {
 
     let read_futures = vec![
         read_temp_from_file("top", timeout),
@@ -164,7 +227,7 @@ mod test {
         let data = "5e 00 4b 46 7f ff 02 10 b0 : crc=b0 YES
                     5e 00 4b 46 7f ff 02 10 b0 t=5875
                     ";
-        assert_eq!(parse_temp(data).unwrap(), 5.875);
+        assert_eq!(parse_temp(data).unwrap().as_raw(), 587);
     }
 
 }
