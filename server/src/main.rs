@@ -8,8 +8,6 @@ mod sensors;
 mod actors;
 //mod web; // TODO
 mod tlog20;
-mod shared;
-mod parameters;
 mod utils;
 
 use std::sync::RwLock;
@@ -20,6 +18,7 @@ use std::time::Duration;
 use std::time::Instant;
 use std::path::PathBuf;
 use std::thread;
+use std::sync::atomic::AtomicBool;
 
 use log::{LevelFilter, Record as LogRecord, log, info, warn, error, debug};
 use env_logger::{Builder as LogBuilder, Target as LogTarget};
@@ -46,8 +45,8 @@ use failure::{err_msg, Error, Fail, ResultExt};
 
 use chrono::prelude::*;
 
-use crate::shared::{setup_shared, Shared, SharedInner};
-use crate::sensors::Temperature;
+use crate::sensors::{Temperature, Temperatures, Sensor};
+use crate::actors::Heater;
 
 use file_db::{FileDb, Timestamped};
 
@@ -68,49 +67,7 @@ pub const SENSOR_FILE_PATH: &'static str =
 pub const HEATER_GPIO: u8 = 17;
 
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum HeaterControlStrategy {
-    /// Use the trigger values defined in `SharedInner::parameters`
-    Auto,
-    ForceOn { until: Instant },
-    ForceOff { until: Instant },
-}
 
-pub enum Event {
-    CtrlC,
-    SigTerm,
-    NewTemperatures,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct DataLogEntry {
-    /// This field contained the filtered raw values from the temperature ADCs.
-    /// Since there is no analog measurement anymore, this field is now unused
-    /// But we must not change the layout of this struct because this is the database
-    /// entry type.
-    pub _mean: [u16; 6],
-    /// The temperature in deg Celsius * 100
-    pub celsius: [i16; 6],
-    pub plug_state: bool,
-    pub reference_celsius: Option<i16>,
-}
-
-pub type TSDataLogEntry = Timestamped<DataLogEntry>;
-pub type MyFileDb = FileDb<TSDataLogEntry>;
-
-impl DataLogEntry {
-    async fn new_from_current(shared: &Shared) -> TSDataLogEntry {
-        Timestamped::now(DataLogEntry {
-            _mean: [0; 6],
-            celsius: shared.temperatures.load().as_raw_with_default(Temperature::from_raw(0)),
-            plug_state: shared.heater.is_heater_on().await.unwrap_or(false),
-            reference_celsius: shared
-                .reference_temperature
-                .load()
-                .map(|temp_in_degc| (temp_in_degc * 100.) as i16),
-        })
-    }
-}
 
 #[async_std::main]
 async fn main() -> Result<(), Error> {
@@ -130,8 +87,17 @@ async fn main() -> Result<(), Error> {
     // Open Database and create thread for asyncronity
     let db = MyFileDb::new_from_env("LOG_FOLDER", 2, "v2").await?;
 
-    // Setup shared data (Handle and CommandSink still missing)
-    let shared = setup_shared(event_sink, db, HEATER_GPIO);
+    // Setup shared data
+    let shared = Arc::new(SharedInner {
+        temperatures: AtomicCell::new(Temperatures::default()),
+        event_sink,
+        heater : Heater::new(HEATER_GPIO),
+        control_strategy : AtomicCell::new(HeaterControlMode::Auto),
+        reference_temperature : AtomicCell::new(None),
+        tlog20_connected: AtomicBool::new(false),
+        db,
+        parameters : Parameters::default(),
+    });
 
     // Hyper will create the tokio core / reactor ...
     // let server = web::make_web_server(&shared)?; TODO
@@ -174,12 +140,129 @@ async fn main() -> Result<(), Error> {
     //server.run_until(shutdown_shot.map_err(|_| ())).unwrap();
 
     // save on shutdown
-    shared.db().save_all().await.unwrap();
+    shared.db.save_all().await.unwrap();
 
     info!("SHUTDOWN! {}", Arc::strong_count(&shared));
 
     Ok(())
 }
+
+// ============================= Misc ===============================
+
+
+/// Mode of operation for the heater
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum HeaterControlMode {
+    /// Use the hysteresis defined in `SharedInner::parameters`
+    Auto,
+    ForceOn { until: Instant },
+    ForceOff { until: Instant },
+}
+
+/// Event variants that can be sent to the main event handler loop.
+/// These events can be sent via `shared.handle_event_async()`, even from sync code.
+pub enum Event {
+    CtrlC,
+    SigTerm,
+    NewTemperatures,
+}
+
+pub struct Parameters {
+    pub plug_trigger_on: AtomicCell<Temperature>,
+    pub plug_trigger_off: AtomicCell<Temperature>,
+    pub use_sensor: Sensor,
+}
+
+
+impl Default for Parameters {
+    fn default() -> Parameters {
+        Parameters {
+            plug_trigger_on: AtomicCell::new(Temperature::from_celsius(0.5)),
+            plug_trigger_off: AtomicCell::new(Temperature::from_celsius(0.7)),
+            //plug_trigger_on: AtomicCell::new(Celsius(22.5)),
+            //plug_trigger_off: AtomicCell::new(Celsius(23.0)),
+            use_sensor: Sensor::Fourth,
+        }
+    }
+}
+
+// ============================= Shared context ===============================
+
+/// The shared context that can be used to access the main loop, get sensor data,
+/// control the heater and access the database.
+pub type Shared = Arc<SharedInner>;
+
+pub struct SharedInner {
+    /// Most recent received temperatures
+    pub temperatures: AtomicCell<Temperatures>,
+    /// Access to actor
+    pub heater : Heater,
+    /// Current control strategy
+    pub control_strategy : AtomicCell<HeaterControlMode>,
+    /// Reference temperature available
+    pub tlog20_connected : AtomicBool,
+    /// TLOG 20 reference temperature (typically not available)
+    pub reference_temperature : AtomicCell<Option<f64>>,
+    /// Queue to main event loop
+    pub event_sink: Sender<Event>,
+    /// Database
+    pub db : MyFileDb,
+    /// Control parameters (Seonsor and hysteresis)
+    pub parameters : Parameters,
+}
+
+impl SharedInner {
+    pub fn handle_event_async(&self, e: Event) {
+        let event_sink = self.event_sink.clone();
+        spawn(async move { event_sink.send(e).await; });
+    }
+}
+
+
+// ============================= Database ===============================
+
+/// The FileDB that is used
+pub type MyFileDb = FileDb<TSDataLogEntry>;
+
+/// The entry type for our specialization of FileDb.
+/// Wrapping by `Timestamped` allows chunking by date
+pub type TSDataLogEntry = Timestamped<DataLogEntry>;
+
+/// The inner entry type for our specialization of FileDb.
+/// (Will be wrapped by file_db::Timestamped)
+/// Keep the layout constant!
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DataLogEntry {
+    /// This field contained the filtered raw values from the temperature ADCs.
+    /// Since there is no analog measurement anymore, this field is now unused
+    /// But we must not change the layout of this struct because this is the database
+    /// entry type.
+    pub _mean: [u16; 6],
+    /// The temperature in deg Celsius * 100
+    /// This unit plays well with `sensors::Temperature::from_raw/to_raw`.
+    pub celsius: [i16; 6],
+    /// The heater state
+    pub plug_state: bool,
+    /// The temperature from the TLOG 20 device, if plugged in
+    pub reference_celsius: Option<i16>,
+}
+
+
+impl DataLogEntry {
+    async fn new_from_current(shared: &Shared) -> TSDataLogEntry {
+        Timestamped::now(DataLogEntry {
+            _mean: [0; 6],
+            celsius: shared.temperatures.load().as_raw_with_default(Temperature::from_raw(0)),
+            plug_state: shared.heater.is_heater_on().await.unwrap_or(false),
+            reference_celsius: shared
+                .reference_temperature
+                .load()
+                .map(|temp_in_degc| (temp_in_degc * 100.) as i16),
+        })
+    }
+}
+
+// ============================= Initialization ===============================
 
 pub fn init_logger() {
     use std::io::Write;
@@ -198,6 +281,9 @@ pub fn init_logger() {
     builder.init();
 }
 
+// ============================= Graceful shutdown helpers =====================
+
+
 type ShutdownTrigger = Box<dyn FnMut() -> () + Send>;
 type ShutdownShot = oneshot::Receiver<()>;
 
@@ -212,6 +298,10 @@ fn setup_shutdown_oneshot() -> (ShutdownTrigger, ShutdownShot) {
     });
     (shutdown_trigger, shutdown_shot)
 }
+
+
+// ============================= async loops / threads / control ================
+
 
 /// Events can be sent via `shared.handle_event_async()`
 ///
@@ -229,7 +319,7 @@ async fn main_event_handler_loop(
                 heater_ctrl(&shared).await;
 
                 shared
-                    .db()
+                    .db
                     .insert_or_update_async(DataLogEntry::new_from_current(&shared).await)
                     .print_and_forget_error().await;
             }
@@ -248,7 +338,7 @@ async fn main_event_handler_loop(
 
 async fn heater_ctrl(shared: &Shared) {
     match shared.control_strategy.load() {
-        HeaterControlStrategy::Auto => {
+        HeaterControlMode::Auto => {
             match shared.temperatures.load().get(shared.parameters.use_sensor) {
                 Some(current) => {
                     if current >= shared.parameters.plug_trigger_off.load() {
@@ -265,10 +355,10 @@ async fn heater_ctrl(shared: &Shared) {
                 }
             }
         }
-        HeaterControlStrategy::ForceOn { .. } => {
+        HeaterControlMode::ForceOn { .. } => {
             shared.heater.turn_heater_on().print_and_forget_error().await;
         }
-        HeaterControlStrategy::ForceOff { .. } => {
+        HeaterControlMode::ForceOff { .. } => {
             shared.heater.turn_heater_off().print_and_forget_error().await;
         }
     }
@@ -278,7 +368,7 @@ async fn heater_ctrl(shared: &Shared) {
 async fn save_database_loop(every: Duration, shared: Shared) {
     let mut interval = interval(every);
     while let Some(_) = interval.next().await {
-        shared.db().save_all().print_and_forget_error_with_context("Could not save database").await;
+        shared.db.save_all().print_and_forget_error_with_context("Could not save database").await;
     }
 }
 
@@ -322,15 +412,15 @@ async fn stdin_handler_loop(shared: Shared) -> Result<(), Error> {
                 );
             }
             "1" => {
-                shared.control_strategy.store(HeaterControlStrategy::ForceOn{ until: Instant::now() + Duration::from_secs(3600 * 12) });
+                shared.control_strategy.store(HeaterControlMode::ForceOn{ until: Instant::now() + Duration::from_secs(3600 * 12) });
                 heater_ctrl(&shared).await;
             }
             "0" => {
-                shared.control_strategy.store(HeaterControlStrategy::ForceOff{ until: Instant::now() + Duration::from_secs(3600 * 12) });
+                shared.control_strategy.store(HeaterControlMode::ForceOff{ until: Instant::now() + Duration::from_secs(3600 * 12) });
                 heater_ctrl(&shared).await;
             }
             "a" => {
-                shared.control_strategy.store(HeaterControlStrategy::Auto);
+                shared.control_strategy.store(HeaterControlMode::Auto);
                 heater_ctrl(&shared).await;
             }
             _ => {}
@@ -348,33 +438,24 @@ async fn control_strategy_timeout_loop(shared: Shared) {
 
         let curr = shared.control_strategy.load();
         let new = match curr {
-            HeaterControlStrategy::Auto => HeaterControlStrategy::Auto,
-            HeaterControlStrategy::ForceOn { until } => {
+            HeaterControlMode::Auto => HeaterControlMode::Auto,
+            HeaterControlMode::ForceOn { until } => {
                 if until <= Instant::now() {
-                    HeaterControlStrategy::Auto
+                    HeaterControlMode::Auto
                 } else {
-                    HeaterControlStrategy::ForceOn { until }
+                    HeaterControlMode::ForceOn { until }
                 }
             },
-            HeaterControlStrategy::ForceOff { until } => {
+            HeaterControlMode::ForceOff { until } => {
                 if until <= Instant::now() {
-                    HeaterControlStrategy::Auto
+                    HeaterControlMode::Auto
                 } else {
-                    HeaterControlStrategy::ForceOff { until }
+                    HeaterControlMode::ForceOff { until }
                 }
             }
         };
         if new != curr {
             shared.control_strategy.store(new);
-        }
-    }
-}
-
-impl HeaterControlStrategy {
-    pub fn is_auto(&self) -> bool {
-        match self {
-            &HeaterControlStrategy::Auto => true,
-            _ => false,
         }
     }
 }

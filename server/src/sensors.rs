@@ -180,8 +180,8 @@ fn parse_temp(data: &str) -> Result<Temperature, Error> {
     let mut parts = data.split("t=");
     let _ = parts.next();
     if let Some(part2) = parts.next() {
-        let temp_degC1000 = i32::from_str_radix(part2.trim(), 10)?;
-        return Ok(Temperature::from_raw((temp_degC1000 / 10) as i16)); // the raw value has the unit degC*100
+        let temp_deg_c1000 = i32::from_str_radix(part2.trim(), 10)?;
+        return Ok(Temperature::from_raw((temp_deg_c1000 / 10) as i16)); // the raw value has the unit degC*100
     }
     bail!("No `t=` in temperature data");
 }
