@@ -45,22 +45,26 @@ impl Stream for SensorStream {
                     // Start the read procedure
                     self.reader_future = Some(read_all_temperatures(self.io_timeout).boxed());
                 }
+                Poll::Ready(None) => {
+                    panic!("interval stream returned Ready(None)");
+                    // return Poll::Ready(None); // should not happen
+                }
                 Poll::Pending => {
                     return Poll::Pending;
                 }
             }
         }
 
-        if let Some(reader_future) = self.reader_future {
+        if let Some(reader_future) = &mut self.reader_future {
             match reader_future.as_mut().poll(cx) {
                 Poll::Ready(temps) => {
                     let temps = [
-                        temps[0].ok(), // Error -> None
-                        temps[1].ok(),
-                        temps[2].ok(),
-                        temps[3].ok(),
-                        temps[4].ok(),
-                        temps[5].ok(),
+                        temps[0].as_ref().map(|f| *f).ok(), // Error -> None
+                        temps[1].as_ref().map(|f| *f).ok(),
+                        temps[2].as_ref().map(|f| *f).ok(),
+                        temps[3].as_ref().map(|f| *f).ok(),
+                        temps[4].as_ref().map(|f| *f).ok(),
+                        temps[5].as_ref().map(|f| *f).ok(),
                     ];
                     return Poll::Ready(Some(temps));
                 }
@@ -78,7 +82,7 @@ impl Stream for SensorStream {
 
 
 fn parse_temp(data: &str) -> Result<f32, Error> {
-    let parts = data.split("t=");
+    let mut parts = data.split("t=");
     let _ = parts.next();
     if let Some(part2) = parts.next() {
         let temp_int = i32::from_str_radix(part2.trim(), 10)?;

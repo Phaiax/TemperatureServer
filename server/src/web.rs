@@ -14,7 +14,7 @@ use crate::utils::{print_error_and_causes, FutureExt, ResultExt as ResultExt2};
 use crate::env;
 
 use tokio_inotify::AsyncINotify;
-use crate::PlugCommand;
+use crate::HeaterControlStrategy;
 
 use failure::{Error, ResultExt, bail};
 
@@ -309,17 +309,17 @@ impl HelloWorld {
             if k_v.next() == Some("action") {
                 match k_v.next() {
                     Some("on") => {
-                        action = Some(PlugCommand::ForceOn {
+                        action = Some(HeaterControlStrategy::ForceOn {
                             until: Instant::now() + SDuration::from_secs(3600 * 12),
                         });
                     }
                     Some("off") => {
-                        action = Some(PlugCommand::ForceOff {
+                        action = Some(HeaterControlStrategy::ForceOff {
                             until: Instant::now() + SDuration::from_secs(3600 * 12),
                         });
                     }
                     Some("auto") => {
-                        action = Some(PlugCommand::Auto);
+                        action = Some(HeaterControlStrategy::Auto);
                     }
                     _ => {}
                 }
