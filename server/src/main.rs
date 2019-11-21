@@ -1,10 +1,10 @@
 #![allow(unreachable_code)]
 #![recursion_limit = "128"]
-
+#![allow(unused_imports)]
 
 mod sensors;
 mod actors;
-//mod web; // TODO
+mod web;
 // mod tlog20; // TODO
 mod utils;
 
@@ -26,6 +26,8 @@ use std::sync::atomic::AtomicBool;
 use crossbeam_utils::atomic::AtomicCell;
 use async_std::sync::{channel, Sender, Receiver, Arc};
 use futures::channel::oneshot;
+use futures::future::{FutureExt as _, TryFutureExt as _};
+
 
 use std::thread;
 use async_std::task::spawn;
@@ -80,7 +82,7 @@ async fn main() -> Result<(), Error> {
     });
 
     // Hyper will create the tokio core / reactor ...
-    // let server = web::make_web_server(&shared)?; TODO
+    let server = web::make_web_server(&shared)?;
 
     // ... which we will reuse for the serial ports and everything else
     //shared.put_handle(server.handle()); TODO
@@ -117,11 +119,10 @@ async fn main() -> Result<(), Error> {
     info!("START EVENT LOOP!");
 
     // Start Webserver
-    // TODO
-    //server.run_until(shutdown_shot.map_err(|_| ())).unwrap();
+    server.run_until(shutdown_shot.map(|_v| Ok(())).boxed().compat()).unwrap();
 
     // block until shutdown is triggered
-    shutdown_shot.await.ok();
+    // shutdown_shot.await.ok();
 
     // save on shutdown
     shared.db.save_all().await.unwrap();

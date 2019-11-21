@@ -1,5 +1,6 @@
 
 use std::future::Future;
+use futures01::Future as Future01;
 use failure::Error;
 use log::error;
 
@@ -54,11 +55,30 @@ where
 }
 
 
+// Impl for the FutureExt trait on Result-Futures
+// impl<F, I, E> FutureExt<F> for F
+// where
+//     F: Future01<Item=I, Error=E> + Sized,
+//     E: Into<Error>
+// {
+//     fn print_and_forget_error(self) -> PrintAndForgetError<Self>
+//     {
+//         PrintAndForgetError::new(self, None)
+//     }
+
+//     fn print_and_forget_error_with_context(self, context : &'static str) -> PrintAndForgetError<Self>
+//     {
+//         PrintAndForgetError::new(self, Some(context))
+//     }
+// }
+
 // Contains the helper struct for the above extension methods that implements Future
 /// (Like the struct `Map` for the combinator `.map()`)
 mod print_and_forget_error {
 
     use futures::Future;
+    use futures01::Future as Future01;
+
     use std::task::{Poll, Context};
     use std::pin::Pin;
     use failure::Error;
@@ -100,6 +120,29 @@ mod print_and_forget_error {
                         None => print_error_and_causes(e),
                     }
                     Poll::Ready(None)
+                },
+            }
+        }
+    }
+
+    impl<F, I, E> Future01 for PrintAndForgetError<F>
+        where F: Future01<Item=I, Error=E>,
+        E: Into<Error>
+    {
+        type Item = ();
+        type Error = ();
+
+        fn poll(&mut self) -> futures01::Poll<(), ()> {
+            use futures01::Async;
+            match self.inner.poll() {
+                Ok(Async::NotReady) => return Ok(Async::NotReady),
+                Ok(Async::Ready(_e)) => Ok(Async::Ready(())),
+                Err(e) => {
+                    match self.context {
+                        Some(context) => print_error_and_causes(e.into().context(context)),
+                        None => print_error_and_causes(e),
+                    }
+                    Err(())
                 },
             }
         }

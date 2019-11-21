@@ -9,16 +9,14 @@ use std::ffi::OsStr;
 use std::sync::Arc;
 use std::time::{Duration as SDuration, Instant};
 
-use crate::utils::{print_error_and_causes, FutureExt, ResultExt as ResultExt2};
+use crate::utils::{print_error_and_causes, FutureExt as _, ResultExt as ResultExt2};
 
-use crate::env;
 
-use tokio_inotify::AsyncINotify;
 use crate::HeaterControlMode;
 
 use failure::{Error, ResultExt, bail};
 
-use crate::shared::Shared;
+use crate::Shared;
 use crate::DataLogEntry;
 use crate::TSDataLogEntry;
 use file_db::{create_intervall_filtermap, TimestampedMethods};
@@ -27,11 +25,15 @@ use hyper::StatusCode;
 use hyper::server::{Http, NewService, Request, Response, Server, Service};
 use hyper::header;
 
+use futures::future::{FutureExt as _, TryFutureExt}; // for conversion
+
 use futures01::future::{self, Future};
 use futures01;
 use futures01::Stream;
 
 use handlebars::Handlebars;
+
+use tokio_inotify::AsyncINotify;
 
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
@@ -42,7 +44,7 @@ use chrono::NaiveDateTime;
 use chrono::{Duration, Timelike};
 
 pub fn make_web_server(shared: &Shared) -> Result<Server<HelloWorldSpawner, ::hyper::Body>, Error> {
-    let assets_folder: PathBuf = ::std::fs::canonicalize(env::var("WEBASSETS_FOLDER")
+    let assets_folder: PathBuf = ::std::fs::canonicalize(std::env::var("WEBASSETS_FOLDER")
         .context("Environment variable WEBASSETS_FOLDER must be set.")?)?;
 
     if !assets_folder.is_dir() {
@@ -112,7 +114,7 @@ pub fn make_web_server(shared: &Shared) -> Result<Server<HelloWorldSpawner, ::hy
     });
     server
         .handle()
-        .spawn(webassets_updater.print_and_forget_error());
+        .spawn(webassets_updater.map_err(|e| print_error_and_causes(e) ));
 
     Ok(server)
 }
@@ -130,7 +132,7 @@ impl NewService for HelloWorldSpawner {
     type Instance = HelloWorld;
     fn new_service(&self) -> Result<Self::Instance, ::std::io::Error> {
         Ok(HelloWorld {
-            shared: Rc::clone(&self.shared),
+            shared: async_std::sync::Arc::clone(&self.shared),
             template_registry: Rc::clone(&self.template_registry),
             assets_folder: Rc::clone(&self.assets_folder),
         })
@@ -210,22 +212,23 @@ impl HelloWorld {
         match NaiveDate::parse_from_str(date.unwrap_or("nodate"), "%Y-%m-%d") {
             Ok(date) => {
                 let shared = self.shared.clone();
-                box_and_convert_error(future::lazy(move || {
-                    let every_3_minutes = create_intervall_filtermap(
-                        Duration::minutes(3),
-                        |data: &TSDataLogEntry| JsData::from(data),
-                        0.25,
-                    );
+
+                let every_3_minutes = create_intervall_filtermap(
+                    Duration::minutes(3),
+                    |data: &TSDataLogEntry| JsData::from(data),
+                    0.25,
+                );
 
 
-                    use file_db::Key;
-                    struct CachedAndFilteredMarker;
-                    impl Key for CachedAndFilteredMarker {
-                        type Value = Vec<u8>;
-                    }
+                use file_db::Key;
+                struct CachedAndFilteredMarker;
+                impl Key for CachedAndFilteredMarker {
+                    type Value = Vec<u8>;
+                }
 
-                    let future1 = shared
-                        .db()
+                let fut = async move {
+                    let serialized = shared
+                        .db
                         .custom_cached_by_chunk_key_async::<CachedAndFilteredMarker>(
                             date.into(),
                             Box::new(move |data: &[::file_db::Timestamped<DataLogEntry>]| {
@@ -236,44 +239,43 @@ impl HelloWorld {
                                     .print_error_and_causes();
                                 buf
                             }),
-                        );
-                    future1.and_then(|serialized: Arc<Vec<u8>>| {
-                        let resp = Response::new()
-                            .with_header(header::ContentLength(serialized.len() as u64))
-                            .with_header(header::ContentType(::hyper::mime::APPLICATION_MSGPACK))
-                            // TODO: Performance by using stream and without copy
-                            .with_body((*serialized).clone());
+                        ).await?;
 
-                        Ok(resp)
-                    })
-                }))
+                    let resp = Response::new()
+                        .with_header(header::ContentLength(serialized.len() as u64))
+                        .with_header(header::ContentType(::hyper::mime::APPLICATION_MSGPACK))
+                        // TODO: Performance by using stream and without copy
+                        .with_body((*serialized).clone());
+
+                    Ok(resp)
+                };
+                box_and_convert_error(fut.boxed().compat())
             }
             Err(_err) => make404(),
         }
     }
 
     fn serve_available_dates(&self) -> HandlerResult {
-        let shared = Rc::clone(&self.shared);
-        box_and_convert_error(future::lazy(move || {
-            let future1 = shared.db().get_non_empty_chunk_keys_async();
-            future1.and_then(|datesvec| {
-                use serde_json;
-                let json_str = serde_json::to_string(&datesvec)?;
+        let shared = async_std::sync::Arc::clone(&self.shared);
+        let fut = async move {
+            let datesvec = shared.db.get_non_empty_chunk_keys_async().await?;
+            let json_str = serde_json::to_string(&datesvec)?;
 
-                let resp = Response::new()
-                    .with_header(header::ContentLength(json_str.len() as u64))
-                    .with_header(header::ContentType(::hyper::mime::APPLICATION_JSON))
-                    .with_body(json_str);
+            let resp = Response::new()
+                .with_header(header::ContentLength(json_str.len() as u64))
+                .with_header(header::ContentType(::hyper::mime::APPLICATION_JSON))
+                .with_body(json_str);
 
-                Ok(resp)
-            })
-        }))
+            Ok(resp)
+        };
+        box_and_convert_error(fut.boxed().compat())
     }
 
     fn serve_current_temperatures(&self) -> HandlerResult {
-        let shared = Rc::clone(&self.shared);
-        box_and_convert_error(future::lazy(move || {
-            let data = DataLogEntry::new_from_current(&shared);
+        let shared = async_std::sync::Arc::clone(&self.shared);
+
+        let fut = async move {
+            let data = DataLogEntry::new_from_current(&shared).await;
 
             #[derive(Serialize)]
             struct Current {
@@ -283,10 +285,9 @@ impl HelloWorld {
 
             let data = Current {
                 block : (&data).into(), // do better
-                plug_command : format!("{:?}", shared.plug_command.get()),
+                plug_command : format!("{:?}", shared.heater.is_heater_on().await),
             };
 
-            use serde_json;
             let json_str = serde_json::to_string(&data)?;
 
             let resp = Response::new()
@@ -295,11 +296,12 @@ impl HelloWorld {
                 .with_body(json_str);
 
             Ok(resp)
-        }))
+        };
+        box_and_convert_error(fut.boxed().compat())
     }
 
     fn set_plug_state(&self, query: &str) -> HandlerResult {
-        let shared = Rc::clone(&self.shared);
+        let shared = async_std::sync::Arc::clone(&self.shared);
         let mut action = None;
         for k_v in query.split('&') {
             if !k_v.contains("=") {
@@ -307,32 +309,27 @@ impl HelloWorld {
             }
             let mut k_v = k_v.split("=");
             if k_v.next() == Some("action") {
-                match k_v.next() {
-                    Some("on") => {
-                        action = Some(HeaterControlMode::ForceOn {
-                            until: Instant::now() + SDuration::from_secs(3600 * 12),
-                        });
-                    }
-                    Some("off") => {
-                        action = Some(HeaterControlMode::ForceOff {
-                            until: Instant::now() + SDuration::from_secs(3600 * 12),
-                        });
-                    }
-                    Some("auto") => {
-                        action = Some(HeaterControlMode::Auto);
-                    }
-                    _ => {}
-                }
+                action = k_v.next();
             }
         }
-        box_and_convert_error(future::lazy(move || match action {
-            None => Ok("do nothing".into()).map(str_to_response),
-            Some(ps) => {
-                let r = Ok(format!("set: {:?}", ps)).map(str_to_response);
-                shared.plug_command.set(ps);
-                r
+        let answer = match action {
+            Some("on") => {
+                shared.control_strategy.store(HeaterControlMode::ForceOn{ until: Instant::now() + SDuration::from_secs(3600 * 12) });
+                "set: on"
             }
-        }))
+            Some("off") => {
+                shared.control_strategy.store(HeaterControlMode::ForceOff{ until: Instant::now() + SDuration::from_secs(3600 * 12) });
+                "set: off"
+            }
+            Some("auto") => {
+                shared.control_strategy.store(HeaterControlMode::Auto);
+                "set: auto"
+            }
+            _ => {
+                "do nothing"
+            }
+        };
+        box_and_convert_error(future::lazy(move || Ok(answer.to_string()).map(str_to_response)))
     }
 }
 
