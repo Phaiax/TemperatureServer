@@ -8,7 +8,7 @@ ul.dates {
 
 }
 
-ul.dates li {
+div.dates li {
     float: left;
     padding: 6px 6px;
     margin: 5px 5px;
@@ -33,4 +33,13 @@ ul.current li {
 
 #curr_plug_command {
     cursor: pointer;
+}
+
+button {
+    clear: both;
+    margin: 0px 0px 6px 5px ;
+    display: block;
+    padding: 6px 10px;
+    border: 1px solid #999999;
+    background-color: #AAA;
 }

@@ -1,6 +1,6 @@
 
 use std::future::Future;
-use futures01::Future as Future01;
+//use futures01::Future as Future01;
 use failure::Error;
 use log::error;
 

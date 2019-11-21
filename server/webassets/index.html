@@ -27,7 +27,7 @@
         <li>Unten: <span id="curr_low"></span>°C </li>
     </ul>
     <div class="clear"></div>
-    <ul id="dates" class="dates"> </ul>
+    <div id="dates" class="dates"> </div>
     <div class="clear"></div>
     <div id="chart_div"></div>
 
@@ -95,10 +95,30 @@
         }
 
         $.get( "dates", function( data ) {
-            var ul = $( "#dates" );
+            var dates = $( "#dates" );
+            var year_uls = {};
             for (var i = 0; i < data.length; i++) {
                 var a = $("<a></a>");
                 var as_js_date = new Date(data[i]);
+                var year = as_js_date.getFullYear();
+                if (! (year in year_uls)) {
+                    var ul = $('<ul></ul>');
+                    ul.css("display", "none");
+                    ul.attr("id", "year-" + year);
+                    var button = $("<button></button>");
+                    button.data("year", year);
+                    button.text(year)
+                    button.click(function() {
+                        var year = $(this).data("year");
+                        console.log(year);
+                        console.log("Slide down year" + year);
+                        $("ul#year-"+year).slideToggle();
+                    });
+                    dates.append(button);
+                    dates.append(ul);
+                    year_uls[year] = ul;
+                }
+                var year_ul = year_uls[year];
                 a.text(as_js_date.toLocaleDateString("de", {weekday: 'short', month: 'numeric', day: 'numeric'}));
                 a.data('date', data[i]);
                 a.click(function() {
@@ -106,7 +126,7 @@
                 });
                 var li = $("<li></li>");
                 li.append(a);
-                ul.append(li);
+                year_ul.append(li);
             };
         });
 
