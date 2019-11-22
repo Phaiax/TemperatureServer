@@ -195,7 +195,7 @@ async fn read_temp_from_file(
         let mut file = File::open(path).await?;
         let mut data = String::with_capacity(80);
         file.read_to_string(&mut data).await?;
-        info!("{}", &data);
+        //info!("{}", &data);
         Ok(data)
     })
     .await?;
@@ -208,7 +208,7 @@ async fn read_all_temperatures(timeout: Duration) -> Vec<Result<Temperature, Err
     let read_futures = vec![
         read_temp_from_file("top", timeout),
         read_temp_from_file("higher", timeout),
-        read_temp_from_file("middle", timeout),
+        read_temp_from_file("mid", timeout),
         read_temp_from_file("lower", timeout),
         read_temp_from_file("bottom", timeout),
         read_temp_from_file("outside", timeout),

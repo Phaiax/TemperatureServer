@@ -278,14 +278,16 @@ impl HelloWorld {
             let data = DataLogEntry::new_from_current(&shared).await;
 
             #[derive(Serialize)]
-            struct Current {
+            struct Current<'a> {
                 block : JsData,
-                plug_command : String,
+                plug_command : &'a str,
             }
 
             let data = Current {
                 block : (&data).into(), // do better
-                plug_command : format!("{:?}", shared.heater.is_heater_on().await),
+                plug_command : shared.heater.is_heater_on().await
+                                            .map(|v| if v { "true" } else { "false" })
+                                            .unwrap_or_else(|_| "unknown"),
             };
 
             let json_str = serde_json::to_string(&data)?;
