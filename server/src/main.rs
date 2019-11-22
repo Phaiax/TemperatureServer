@@ -227,7 +227,7 @@ pub struct DataLogEntry {
     /// This unit plays well with `sensors::Temperature::from_raw/to_raw`.
     pub celsius: [i16; 6],
     /// The heater state
-    pub plug_state: bool,
+    pub heater_state: bool,
     /// The temperature from the TLOG 20 device, if plugged in
     pub reference_celsius: Option<i16>,
 }
@@ -238,7 +238,7 @@ impl DataLogEntry {
         Timestamped::now(DataLogEntry {
             _mean: [0; 6],
             celsius: shared.temperatures.load().as_raw_with_default(Temperature::from_raw(0)),
-            plug_state: shared.heater.is_heater_on().await.unwrap_or(false),
+            heater_state: shared.heater.is_heater_on().await.unwrap_or(false),
             reference_celsius: shared
                 .reference_temperature
                 .load()

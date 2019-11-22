@@ -4,12 +4,19 @@
     height: 1px;
 }
 
-ul.dates {
+div.dates {
+    margin-left: 50px;
+    margin-right: 5px;
+}
 
+div.dates ul {
+    margin: 10px 10px;
+    width: 95%;
 }
 
 div.dates li {
-    float: left;
+    display: inline-block;
+    /* float: left; */
     padding: 6px 6px;
     margin: 5px 5px;
     border: 1px solid #999999;
@@ -37,9 +44,14 @@ ul.current li {
 
 button {
     clear: both;
-    margin: 0px 0px 6px 5px ;
+    margin: 0px 0px 6px 0px ;
     display: block;
     padding: 6px 10px;
     border: 1px solid #999999;
     background-color: #AAA;
+}
+
+#boxheizung {
+    cursor: pointer;
+    background-color: #FEE;
 }

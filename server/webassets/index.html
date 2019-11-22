@@ -14,7 +14,7 @@
 <body>
     <ul class="current">
         <li>Zeit: <span id="curr_time"></span> </li>
-        <li id="boxheizung">Heizung: <span id="curr_plug_state"></span> <span id="curr_plug_command"></span> </li>
+        <li id="boxheizung">Heizung: <span id="heater_state"></span> <span id="control_strategy"></span> </li>
         <li>Außen: <span id="curr_outside"></span>°C </li>
         <li>Referenz: <span id="curr_reference"></span>°C </li>
     </ul>
@@ -130,17 +130,17 @@
             };
         });
 
-        var plug_command = "Auto";
+        var control_strategy = "Auto";
 
         $('#boxheizung').click(function() {
-            if (plug_command == "Auto") {
-                $.get("set_plug_state?action=on", function(data) { console.log(data); });
+            if (control_strategy == "Auto") {
+                $.get("set_heater_control_strategy?action=on", function(data) { console.log(data); });
             }
-            else if (plug_command == "ForceOn") {
-                $.get("set_plug_state?action=off", function(data) { console.log(data); });
+            else if (control_strategy == "ForceOn") {
+                $.get("set_heater_control_strategy?action=off", function(data) { console.log(data); });
             }
-            else if (plug_command == "ForceOff") {
-                $.get("set_plug_state?action=auto", function(data) { console.log(data); });
+            else if (control_strategy == "ForceOff") {
+                $.get("set_heater_control_strategy?action=auto", function(data) { console.log(data); });
             }
             get_current_state();
         });
@@ -152,10 +152,10 @@
                     { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
                 $('#curr_time').text(strdate);
 
-                if (data.block.plug_state == 1) {
-                    $('#curr_plug_state').text("EIN");
+                if (data.block.heater_state == 1) {
+                    $('#heater_state').text("EIN");
                 } else {
-                    $('#curr_plug_state').text("AUS");
+                    $('#heater_state').text("AUS");
                 }
                 $('#curr_high').text(data.block.high);
                 $('#curr_highmid').text(data.block.highmid);
@@ -164,17 +164,17 @@
                 $('#curr_low').text(data.block.low);
                 $('#curr_outside').text(data.block.outside);
                 $('#curr_reference').text(data.block.reference);
-                if (data.plug_command.indexOf('Auto') != -1) {
-                    plug_command = "Auto";
-                    $('#curr_plug_command').text("(" + plug_command + ")");
+                if (data.control_strategy.indexOf('Auto') != -1) {
+                    control_strategy = "Auto";
+                    $('#control_strategy').text("(" + control_strategy + ")");
                 }
-                if (data.plug_command.indexOf('ForceOn') != -1) {
-                    plug_command = "ForceOn";
-                    $('#curr_plug_command').text("(" + plug_command + ")");
+                if (data.control_strategy.indexOf('ForceOn') != -1) {
+                    control_strategy = "ForceOn";
+                    $('#control_strategy').text("(" + control_strategy + ")");
                 }
-                if (data.plug_command.indexOf('ForceOff') != -1) {
-                    plug_command = "ForceOff";
-                    $('#curr_plug_command').text("(" + plug_command + ")");
+                if (data.control_strategy.indexOf('ForceOff') != -1) {
+                    control_strategy = "ForceOff";
+                    $('#control_strategy').text("(" + control_strategy + ")");
                 }
             });
         }

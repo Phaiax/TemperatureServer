@@ -164,8 +164,8 @@ impl Service for HelloWorld {
             Some("history") => self.serve_history(path_segments.next()),
             Some("dates") => self.serve_available_dates(),
             Some("current") => self.serve_current_temperatures(),
-            Some("set_plug_state") if _req.query().is_some() => {
-                self.set_plug_state(_req.query().unwrap())
+            Some("set_heater_control_strategy") if _req.query().is_some() => {
+                self.set_heater_control_strategy(_req.query().unwrap())
             }
             _ => make404(),
         };
@@ -278,16 +278,14 @@ impl HelloWorld {
             let data = DataLogEntry::new_from_current(&shared).await;
 
             #[derive(Serialize)]
-            struct Current<'a> {
+            struct Current {
                 block : JsData,
-                plug_command : &'a str,
+                control_strategy : String,
             }
 
             let data = Current {
                 block : (&data).into(), // do better
-                plug_command : shared.heater.is_heater_on().await
-                                            .map(|v| if v { "true" } else { "false" })
-                                            .unwrap_or_else(|_| "unknown"),
+                control_strategy : format!("{:?}", shared.control_strategy.load()),
             };
 
             let json_str = serde_json::to_string(&data)?;
@@ -302,7 +300,7 @@ impl HelloWorld {
         box_and_convert_error(fut.boxed().compat())
     }
 
-    fn set_plug_state(&self, query: &str) -> HandlerResult {
+    fn set_heater_control_strategy(&self, query: &str) -> HandlerResult {
         let shared = async_std::sync::Arc::clone(&self.shared);
         let mut action = None;
         for k_v in query.split('&') {
@@ -413,7 +411,7 @@ pub struct JsData {
     pub midlow: f64,
     pub low: f64,
     pub outside: f64,
-    pub plug_state: u8,
+    pub heater_state: u8,
     pub reference: f64,
 }
 
@@ -427,7 +425,7 @@ impl<'a> From<&'a TSDataLogEntry> for JsData {
             midlow: d.celsius[3] as f64 / 100.0,
             low: d.celsius[4] as f64 / 100.0,
             outside: d.celsius[5] as f64 / 100.0,
-            plug_state: if d.plug_state { 1 } else { 0 },
+            heater_state: if d.heater_state { 1 } else { 0 },
             reference: d.reference_celsius.unwrap_or(0) as f64 / 100.0,
         }
     }
