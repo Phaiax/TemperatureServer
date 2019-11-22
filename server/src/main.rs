@@ -452,5 +452,6 @@ async fn temperature_read_loop(shared: Shared) {
     let mut sensor_stream = SensorStream::new(Duration::from_secs(2));
     while let Some(temps) = sensor_stream.next().await {
         shared.temperatures.store(temps);
+        shared.handle_event_async(Event::NewTemperatures);
     }
 }
