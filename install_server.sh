@@ -2,7 +2,7 @@
 
 
 SERVICENAME=temperatures
-EXECUTABLE=$(pwd)/target/debug/server
+EXECUTABLE=$(pwd)/target/release/server
 SERVICEFILE=/etc/systemd/system/${SERVICENAME}.service
 USER=$USER
 LOG_FOLDER=${HOME}/log

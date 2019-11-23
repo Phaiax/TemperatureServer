@@ -59,7 +59,6 @@
                     table.addColumn('number', 'Stecker');
                     table.addColumn('number', 'Reference');
                     table.addRows(data);
-
                     tables[date] = table;
                 }
 
@@ -68,7 +67,9 @@
                                'height':300};
 
                 var chart = new google.visualization.LineChart(document.getElementById('chart_div'));
-                chart.draw(table, options);
+	        var view = new google.visualization.DataView(table);
+	        view.hideColumns([8]); 
+                chart.draw(view, options);
             });
         };
 
