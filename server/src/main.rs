@@ -116,7 +116,7 @@ async fn run() -> Result<(), Error> {
     setup_ctrlc_and_sigint_forwarding(shared.clone()); // starts a thread
 
     // Handle stdin. Command interpreting occours here.
-    spawn(stdin_handler_loop(shared.clone()));
+//    spawn(stdin_handler_loop(shared.clone()));
 
     // Events can be sent via `shared.handle_event_async()`
     spawn(main_event_handler_loop(shared.clone(), event_stream, shutdown_trigger));
