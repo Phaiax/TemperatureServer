@@ -15,7 +15,7 @@
 		{
 			"rls":
 			{
-				"enabled": true
+				"enabled": false
 			}
 		},
 		"rust_syntax_checking": false
