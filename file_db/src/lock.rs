@@ -8,7 +8,7 @@ use std::os::unix::io::AsRawFd;
 //use std::io::Write;
 
 use log::{error};
-use failure::{Error, bail};
+use failure::{Error, bail, ResultExt as _};
 
 use libc::c_int;
 use libc::getpid;
@@ -48,7 +48,8 @@ impl ExclusiveFilesystembasedLock {
             // release file and lock, we want to truncate the file and write our own pid.
         }
 
-        let mut file = File::create(&path).await?;
+        let mut file = File::create(&path).await
+            .with_context(|_| format!("Can't create lock file {:?}.", path))?;
         match Self::place_lock(&file).await? {
             FlockResult::AlreadyLocked => bail!("Already locked. (Datarace?)"),
             FlockResult::LockPlaced => {}
