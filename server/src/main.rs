@@ -18,7 +18,7 @@ use async_std::stream::interval;
 use log::{LevelFilter, info};
 use env_logger::{Builder as LogBuilder, Target as LogTarget};
 use dotenv::dotenv;
-use failure::Error;
+use failure::{Error, ResultExt as _};
 
 use serde_derive::{Serialize, Deserialize};
 
@@ -30,7 +30,7 @@ use futures::future::{FutureExt as _, TryFutureExt as _};
 
 
 use std::thread;
-use async_std::task::spawn;
+use async_std::task::{spawn, block_on};
 use crate::utils::FutureExt;
 
 use crate::sensors::{Temperature, Temperatures, Sensor, SensorStream};
@@ -49,10 +49,21 @@ pub const SENSOR_FILE_PATH: &'static str =
 pub const HEATER_GPIO: u8 = 17;
 
 
+fn main() {
+
+    match block_on(run()) {
+        Ok(_) => { }
+        Err(e) => {
+            crate::utils::print_error_and_causes(e);
+            use std::io::Write as _;
+            std::io::stderr().lock().flush().ok();
+            std::io::stdout().lock().flush().ok();
+        }
+    }
+}
 
 
-#[async_std::main]
-async fn main() -> Result<(), Error> {
+async fn run() -> Result<(), Error> {
     // Sync environment from .env
     dotenv().ok();
 
@@ -67,7 +78,9 @@ async fn main() -> Result<(), Error> {
     let (event_sink, event_stream) = channel::<Event>(1);
 
     // Open Database
-    let db = MyFileDb::new_from_env("LOG_FOLDER", 2, "v2").await?;
+    let db = MyFileDb::new_from_env("LOG_FOLDER", 2, "v2").await
+	.with_context(|_e| "Can't open database. Does env var LOG_FOLDER exist?")?;
+    info!("Database created");
 
     // Setup shared context
     let shared = Arc::new(SharedInner {
@@ -83,6 +96,7 @@ async fn main() -> Result<(), Error> {
 
     // Hyper will create the tokio core / reactor ...
     let server = web::make_web_server(&shared)?;
+    info!("Server initialised");
 
     // ... which we will reuse for the serial ports and everything else
     //shared.put_handle(server.handle()); TODO
@@ -264,6 +278,7 @@ pub fn init_logger() {
     });
     builder.filter(None, LevelFilter::Info);
     builder.init();
+    info!("Logger initiated");
 }
 
 // ============================= Graceful shutdown helpers =====================
@@ -298,6 +313,7 @@ async fn main_event_handler_loop(
     mut event_stream: Receiver<Event>,
     mut shutdown_trigger: ShutdownTrigger,
 ) {
+    info!("main_event_handler_loop spawned");
     while let Some(event) = event_stream.next().await {
         match event {
             Event::NewTemperatures => {
@@ -351,6 +367,7 @@ async fn heater_ctrl(shared: &Shared) {
 
 
 async fn save_database_loop(every: Duration, shared: Shared) {
+    info!("save_database_loop spawned");
     let mut interval = interval(every);
     while let Some(_) = interval.next().await {
         shared.db.save_all().print_and_forget_error_with_context("Could not save database").await;
@@ -367,6 +384,7 @@ fn setup_ctrlc_and_sigint_forwarding(shared: Shared) {
     ]).unwrap();
 
     thread::spawn(move || {
+        info!("ctrc_and_signint_forwarding thread started");
         for signal in signals.forever() {
             match signal {
                 signal_hook::SIGTERM => {
@@ -384,7 +402,7 @@ fn setup_ctrlc_and_sigint_forwarding(shared: Shared) {
 
 
 async fn stdin_handler_loop(shared: Shared) -> Result<(), Error> {
-
+    info!("stdin_handler_loop spawned");
     let stdin_stream = async_std::io::stdin();
     let mut line = String::new();
     #[allow(irrefutable_let_patterns)]
@@ -421,6 +439,7 @@ async fn stdin_handler_loop(shared: Shared) -> Result<(), Error> {
 
 
 async fn control_strategy_timeout_loop(shared: Shared) {
+    info!("control_strategy_timeout_loop spawned");
     let mut interval = interval(Duration::from_secs(1));
     while let Some(_) = interval.next().await {
 
@@ -449,9 +468,12 @@ async fn control_strategy_timeout_loop(shared: Shared) {
 }
 
 async fn temperature_read_loop(shared: Shared) {
+    info!("temperature_read_loop spawned!");
     let mut sensor_stream = SensorStream::new(Duration::from_secs(2));
     while let Some(temps) = sensor_stream.next().await {
         shared.temperatures.store(temps);
         shared.handle_event_async(Event::NewTemperatures);
     }
 }
+
+
