@@ -400,7 +400,7 @@ fn setup_ctrlc_and_sigint_forwarding(shared: Shared) {
 
 }
 
-
+#[allow(unused)]
 async fn stdin_handler_loop(shared: Shared) -> Result<(), Error> {
     info!("stdin_handler_loop spawned");
     let stdin_stream = async_std::io::stdin();
@@ -471,6 +471,8 @@ async fn temperature_read_loop(shared: Shared) {
     info!("temperature_read_loop spawned!");
     let mut sensor_stream = SensorStream::new(Duration::from_secs(2));
     while let Some(temps) = sensor_stream.next().await {
+        let previous = shared.temperatures.load();
+        let temps = temps.replace_missing(previous);
         shared.temperatures.store(temps);
         shared.handle_event_async(Event::NewTemperatures);
     }

@@ -53,6 +53,19 @@ impl Temperatures {
             self.temps[5].unwrap_or(default).as_raw(),
         ]
     }
+
+    pub fn replace_missing(&self, defaults: Temperatures) -> Temperatures {
+        Temperatures {
+            temps: [
+                self.temps[0].or(defaults.temps[0]),
+                self.temps[1].or(defaults.temps[1]),
+                self.temps[2].or(defaults.temps[2]),
+                self.temps[3].or(defaults.temps[3]),
+                self.temps[4].or(defaults.temps[4]),
+                self.temps[5].or(defaults.temps[5]),
+            ]
+        }
+    }
 }
 
 impl fmt::Debug for Temperatures {
