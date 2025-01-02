@@ -95,6 +95,7 @@ impl fmt::Debug for Temperatures {
 
 impl From<Vec<Result<Temperature, Error>>> for Temperatures {
     fn from(from: Vec<Result<Temperature, Error>>) -> Temperatures {
+        // info!("{:?}", from);
         Temperatures { temps : [
             from[0].as_ref().map(|f| *f).ok(), // Error -> None
             from[1].as_ref().map(|f| *f).ok(),
@@ -208,7 +209,7 @@ async fn read_temp_from_file(
         let mut file = File::open(path).await?;
         let mut data = String::with_capacity(80);
         file.read_to_string(&mut data).await?;
-        //info!("{}", &data);
+        // info!("{sensorname} {}", &data);
         Ok(data)
     })
     .await?;

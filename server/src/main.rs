@@ -468,7 +468,7 @@ async fn control_strategy_timeout_loop(shared: Shared) {
 
 async fn temperature_read_loop(shared: Shared) {
     info!("temperature_read_loop spawned!");
-    let mut sensor_stream = SensorStream::new(Duration::from_secs(2));
+    let mut sensor_stream = SensorStream::new(Duration::from_secs(15));
     while let Some(temps) = sensor_stream.next().await {
         let previous = shared.temperatures.load();
         let temps = temps.replace_missing(previous);
