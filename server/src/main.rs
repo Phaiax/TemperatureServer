@@ -24,7 +24,8 @@ use serde_derive::{Serialize, Deserialize};
 
 use std::sync::atomic::AtomicBool;
 use crossbeam_utils::atomic::AtomicCell;
-use async_std::sync::{channel, Sender, Receiver, Arc};
+use async_std::channel::{bounded, Sender, Receiver};
+use async_std::sync::Arc;
 use futures::channel::oneshot;
 use futures::future::{FutureExt as _, TryFutureExt as _};
 
@@ -75,7 +76,7 @@ async fn run() -> Result<(), Error> {
 
     // Channel from the shared context to the
     // main event loop (see `main_event_handler_loop()`)
-    let (event_sink, event_stream) = channel::<Event>(1);
+    let (event_sink, event_stream) = bounded::<Event>(1);
 
     // Open Database
     let db = MyFileDb::new_from_env("LOG_FOLDER", 2, "v2").await
@@ -213,7 +214,7 @@ pub struct SharedInner {
 impl SharedInner {
     pub fn handle_event_async(&self, e: Event) {
         let event_sink = self.event_sink.clone();
-        spawn(async move { event_sink.send(e).await; });
+        spawn(async move { let _ = event_sink.send(e).await; });
     }
 }
 

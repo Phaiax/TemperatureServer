@@ -121,7 +121,7 @@ pub fn make_web_server(shared: &Shared) -> Result<Server<HelloWorldSpawner, ::hy
 
 pub struct HelloWorldSpawner {
     shared: Shared,
-    template_registry: Rc<RefCell<Handlebars>>,
+    template_registry: Rc<RefCell<Handlebars<'static>>>,
     assets_folder: Rc<PathBuf>,
 }
 
@@ -141,7 +141,7 @@ impl NewService for HelloWorldSpawner {
 
 pub struct HelloWorld {
     shared: Shared,
-    template_registry: Rc<RefCell<Handlebars>>,
+    template_registry: Rc<RefCell<Handlebars<'static>>>,
     assets_folder: Rc<PathBuf>,
 }
 
