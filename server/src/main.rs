@@ -38,8 +38,6 @@ use crate::sensors::{Temperature, Temperatures, Sensor, SensorStream};
 use crate::actors::Heater;
 use file_db::{FileDb, Timestamped};
 
-//use tokio_inotify::AsyncINotify;
-
 
 pub const TLOG20_SERIAL_DEVICE: &'static str =
     "/dev/serial/by-id/usb-FTDI_US232R_FT0ILAKP-if00-port0";

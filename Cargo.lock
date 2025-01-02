@@ -904,15 +904,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "inotify"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "887fcc180136e77a85e6a6128579a719027b1bab9b1c38ea4444244fe262c20c"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "instant"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1604,7 +1595,6 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "tokio-core",
- "tokio-inotify",
  "tokio-io",
  "tokio-proto",
  "tokio-service",
@@ -1870,18 +1860,6 @@ dependencies = [
  "futures 0.1.31",
  "tokio-io",
  "tokio-threadpool",
-]
-
-[[package]]
-name = "tokio-inotify"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f14cfc286d5f2304c616cb545f772c32f1dab2dc48460877fcc782aedc781c5"
-dependencies = [
- "futures 0.1.31",
- "inotify",
- "mio",
- "tokio-core",
 ]
 
 [[package]]

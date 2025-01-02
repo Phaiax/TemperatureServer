@@ -33,8 +33,6 @@ use futures01::Stream;
 
 use handlebars::Handlebars;
 
-use tokio_inotify::AsyncINotify;
-
 use rmp_serde::{Deserializer, Serializer};
 use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize, Serialize};
@@ -61,6 +59,7 @@ pub fn make_web_server(shared: &Shared) -> Result<Server<HelloWorldSpawner, ::hy
     }
 
     let template_registry = Rc::new(RefCell::new(Handlebars::new()));
+    template_registry.borrow_mut().set_dev_mode(true);
 
     let addr = "0.0.0.0:12345".parse().unwrap();
     let server = Http::new()
@@ -83,38 +82,6 @@ pub fn make_web_server(shared: &Shared) -> Result<Server<HelloWorldSpawner, ::hy
             format!("Cannot compile {}", &index_html.to_string_lossy())
         })?;
     // todo find all other .html files in the folder
-
-    // React live on asset changes
-
-    let path_notify = AsyncINotify::init(&server.handle())?;
-    const IN_CLOSE_WRITE: u32 = 8;
-    path_notify
-        .add_watch(&assets_folder, IN_CLOSE_WRITE)
-        .context("Web server can not watch the webassets folder for changes.")?;
-
-    let template_registry1 = Rc::clone(&template_registry);
-    let webassets_updater = path_notify.for_each(move |_event| {
-        if _event.name.extension().unwrap_or(OsStr::new("")) == "html" {
-            template_registry1
-                .try_borrow_mut()
-                .map(|mut registry| {
-                    registry
-                        .register_template_file(
-                            &_event.name.to_string_lossy(),
-                            assets_folder.join(&_event.name),
-                        )
-                        .with_context(|_e| {
-                            format!("Cannot compile {}", &_event.name.to_string_lossy())
-                        })
-                        .print_error_and_causes();
-                })
-                .print_error_and_causes();
-        }
-        future::ok(())
-    });
-    server
-        .handle()
-        .spawn(webassets_updater.map_err(|e| print_error_and_causes(e) ));
 
     Ok(server)
 }
