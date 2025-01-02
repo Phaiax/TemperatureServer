@@ -378,19 +378,19 @@ async fn save_database_loop(every: Duration, shared: Shared) {
 fn setup_ctrlc_and_sigint_forwarding(shared: Shared) {
     use signal_hook::iterator::Signals;
 
-    let signals = Signals::new(&[
-        signal_hook::SIGTERM,
-        signal_hook::SIGINT,
+    let mut signals = Signals::new(&[
+        signal_hook::consts::SIGTERM,
+        signal_hook::consts::SIGINT,
     ]).unwrap();
 
     thread::spawn(move || {
         info!("ctrc_and_signint_forwarding thread started");
         for signal in signals.forever() {
             match signal {
-                signal_hook::SIGTERM => {
+                signal_hook::consts::SIGTERM => {
                     shared.handle_event_async(Event::SigTerm);
                 },
-                signal_hook::SIGINT => {
+                signal_hook::consts::SIGINT => {
                     shared.handle_event_async(Event::CtrlC);
                 },
                 _ => unreachable!(),
