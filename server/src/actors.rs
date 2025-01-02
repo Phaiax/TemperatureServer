@@ -1,72 +1,56 @@
 
-
+use std::mem;
+use std::rc::Rc;
 use std::time::Duration;
 use async_std::task::sleep;
 
 use async_std::sync::Mutex;
 
-use async_std::fs;
-use async_std::path::{PathBuf};
-
 use failure::{Error, ResultExt};
 use log::info;
+
+use async_std_gpiod::{Chip, Options, Lines, Output};
 
 pub struct Heater {
     /// Used to prevent concurrent access to the heater io
     mutex : Mutex<()>,
-    gpio_pin : Vec<u8>,
-    sysfs_gpio_export_path : PathBuf,
-    sysfs_gpio_path : PathBuf,
-    sysfs_gpio_value_path : PathBuf,
-    sysfs_gpio_direction_path : PathBuf,
+    outputs: Lines<Output>,
 }
 
 impl Heater {
-    pub fn new(gpio_pin : u8) -> Heater {
-        Heater {
+    pub async fn new(gpio_pin : u8) -> Result<Heater, Error> {
+        let chip = Rc::new(Chip::new("gpiochip0").await?);
+        let opts = Options::output([gpio_pin as u32]) // lines offsets
+                .values([false]) // initial values
+                .consumer("temperatures");
+        let outputs = chip.request_lines(opts).await?;
+        mem::forget(chip);
+        Ok(Heater {
             mutex : Mutex::new(()),
-            gpio_pin: format!("{}", gpio_pin).into_bytes(),
-            sysfs_gpio_export_path : PathBuf::from("/sys/class/gpio/export"),
-            sysfs_gpio_path : PathBuf::from(format!("/sys/class/gpio/gpio{}", gpio_pin)),
-            sysfs_gpio_value_path : PathBuf::from(format!("/sys/class/gpio/gpio{}/value", gpio_pin)),
-            sysfs_gpio_direction_path : PathBuf::from(format!("/sys/class/gpio/gpio{}/direction", gpio_pin)),
-        }
-    }
-
-    async fn assert_gpio_is_exported(&self) -> Result<(), Error> {
-        if !self.sysfs_gpio_path.is_dir().await {
-            fs::write(&self.sysfs_gpio_export_path, &self.gpio_pin).await.context("No GPIO in sysfs")?;
-            sleep(Duration::from_millis(200)).await;
-            fs::write(&self.sysfs_gpio_direction_path, "out").await?;
-            sleep(Duration::from_millis(200)).await;
-        }
-        Ok(())
+            outputs,
+        })
     }
 
     pub async fn turn_heater_on(&self) -> Result<(), Error> {
-        self.assert_gpio_is_exported().await?;
         let _lock = self.mutex.lock().await; // prevent opening the sysfs_gpio_value_path twice at the same time
         if ! self.is_heater_on().await? {
             info!("Turn Plug on");
         }
-        fs::write(&self.sysfs_gpio_value_path, "1").await?;
+        self.outputs.set_values([true]).await?;
         Ok(())
     }
 
     pub async fn turn_heater_off(&self) -> Result<(), Error> {
-        self.assert_gpio_is_exported().await?;
         let _lock = self.mutex.lock().await; // prevent opening the sysfs_gpio_value_path twice at the same time
         if self.is_heater_on().await? {
             info!("Turn Plug off");
         }
-        fs::write(&self.sysfs_gpio_value_path, "0").await?;
+        self.outputs.set_values([false]).await?;
         Ok(())
     }
 
     pub async fn is_heater_on(&self) -> Result<bool, Error> {
-        self.assert_gpio_is_exported().await?;
-        let data = fs::read(&self.sysfs_gpio_value_path).await?;
-        Ok(data[0] == b'1')
+        Ok(self.outputs.get_values([false]).await?[0])
     }
 
 }

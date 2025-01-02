@@ -86,7 +86,7 @@ async fn run() -> Result<(), Error> {
     let shared = Arc::new(SharedInner {
         temperatures: AtomicCell::new(Temperatures::default()),
         event_sink,
-        heater : Heater::new(HEATER_GPIO),
+        heater : Heater::new(HEATER_GPIO).await?,
         control_strategy : AtomicCell::new(HeaterControlMode::Auto),
         tlog20_connected: AtomicBool::new(false),
         reference_temperature : AtomicCell::new(None),

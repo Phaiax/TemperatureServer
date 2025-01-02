@@ -35,3 +35,5 @@ regex = "0.2"
 libc = "0.2"
 handlebars = "0.29"
 file_db = { path = "../file_db" }
+async-std-gpiod = "0.2.3"
+
